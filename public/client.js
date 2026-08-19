@@ -68,6 +68,20 @@ $('btn-copy-code').addEventListener('click', () => {
   setTimeout(() => { $('btn-copy-code').textContent = 'Скопіювати код'; }, 1500);
 });
 
+function backToMenu() {
+  myPlayer = null;
+  roomCode = null;
+  $('input-code').value = '';
+  $('menu-error').textContent = '';
+  showScreen('menu');
+  setStatus('Підключено до сервера');
+}
+
+$('btn-cancel-waiting').addEventListener('click', () => {
+  sendMsg({ type: 'leave' });
+  backToMenu();
+});
+
 // ---------- Placement state ----------
 let placedShips = []; // { cells: [[r,c],...] }
 let occupiedSet = new Set();
@@ -413,6 +427,12 @@ function handleMessage(msg) {
       setStatus('Суперник відключився.');
       alert('Суперник відключився від гри.');
       location.reload();
+      break;
+
+    case 'opponent_left':
+      setStatus('Суперник скасував гру.');
+      alert('Суперник скасував гру.');
+      backToMenu();
       break;
   }
 }

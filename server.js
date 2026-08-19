@@ -145,7 +145,7 @@ function otherKey(key) {
 }
 
 function broadcastRoom(room, msg) {
-  send(room.players.p1.ws, msg);
+  if (room.players.p1) send(room.players.p1.ws, msg);
   if (room.players.p2) send(room.players.p2.ws, msg);
 }
 
@@ -217,9 +217,25 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (msg.type === 'leave') {
+      if (roomCode && myKey) {
+        const room = rooms.get(roomCode);
+        if (room) {
+          const opp = room.players[otherKey(myKey)];
+          room.players[myKey] = null;
+          if (opp) send(opp.ws, { type: 'opponent_left' });
+          if (!room.players.p1 && !room.players.p2) rooms.delete(roomCode);
+        }
+      }
+      roomCode = null;
+      myKey = null;
+      return;
+    }
+
     const room = rooms.get(roomCode);
     if (!room || !myKey) return;
     const me = room.players[myKey];
+    if (!me) return;
     const opp = room.players[otherKey(myKey)];
 
     if (msg.type === 'place') {

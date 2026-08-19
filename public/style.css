@@ -55,6 +55,23 @@ h1 {
   min-height: 1.2em;
 }
 
+.opp-status-banner {
+  margin: 8px auto 0;
+  max-width: 480px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: #3a2a10;
+  border: 1px solid #6a4a1a;
+  color: var(--accent-2);
+}
+.opp-status-banner.ok {
+  background: #103a24;
+  border-color: #1f6a44;
+  color: var(--ok);
+}
+
 #app {
   width: 100%;
   max-width: 900px;

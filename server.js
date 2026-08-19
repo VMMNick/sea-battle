@@ -45,6 +45,9 @@ const server = http.createServer((req, res) => {
 const SIZE = 10;
 // Класичний набір кораблів: 1x4, 2x3, 3x2, 4x1
 const SHIP_LENGTHS = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
+// Скільки часу гравець може бути офлайн (втрата з'єднання, перезавантаження
+// сторінки, закриття вкладки), перш ніж суперник вважатиме гру завершеною.
+const RECONNECT_GRACE_MS = 5 * 60 * 1000;
 
 function emptyGrid() {
   return Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
@@ -122,13 +125,45 @@ function makeRoomCode() {
   return code;
 }
 
+function makeToken() {
+  return crypto.randomBytes(12).toString('hex');
+}
+
 function newPlayer(ws) {
   return {
     ws,
+    token: makeToken(), // secret used by this player's browser to reconnect to this exact seat
     ships: null, // validated ship list with hit tracking
     shotsReceived: emptyGrid(), // what opponent has fired at us: 'hit' | 'miss'
     ready: false,
+    rematchWanted: false,
     connected: true,
+    disconnectedAt: null,
+  };
+}
+
+// What a reconnecting client needs to fully rebuild the UI it left behind.
+function buildResumeSnapshot(room, myKey) {
+  const me = room.players[myKey];
+  const opp = room.players[otherKey(myKey)];
+  const sunkEnemyShips = opp && opp.ships
+    ? opp.ships.filter((s) => s.hits.size === s.cells.length).map((s) => s.cells)
+    : [];
+  return {
+    type: 'resumed',
+    code: room.code,
+    player: myKey,
+    phase: room.phase,
+    turn: room.turn,
+    winner: room.winner || null,
+    amReady: !!me.ready,
+    myShips: me.ships ? me.ships.map((s) => s.cells) : null,
+    myShotsReceived: me.shotsReceived, // shots the opponent has fired at me
+    myShotsOnOpp: opp ? opp.shotsReceived : emptyGrid(), // my shots fired at the opponent
+    sunkEnemyShips,
+    oppConnected: !!(opp && opp.connected),
+    oppReady: !!(opp && opp.ready),
+    oppPresent: !!opp,
   };
 }
 
@@ -163,6 +198,7 @@ function resetRoomForRematch(room) {
   }
   room.phase = 'placement';
   room.turn = 'p1';
+  room.winner = null;
 }
 
 const wss = new WebSocketServer({ server });
@@ -193,7 +229,7 @@ wss.on('connection', (ws) => {
       rooms.set(code, room);
       roomCode = code;
       myKey = 'p1';
-      send(ws, { type: 'created', code, player: 'p1' });
+      send(ws, { type: 'created', code, player: 'p1', token: room.players.p1.token });
       return;
     }
 
@@ -212,8 +248,37 @@ wss.on('connection', (ws) => {
       roomCode = code;
       myKey = 'p2';
       room.phase = 'placement';
-      send(ws, { type: 'joined', code, player: 'p2' });
+      send(ws, { type: 'joined', code, player: 'p2', token: room.players.p2.token });
       broadcastRoom(room, { type: 'start_placement' });
+      return;
+    }
+
+    if (msg.type === 'resume') {
+      const code = String(msg.code || '').toUpperCase().trim();
+      const token = String(msg.token || '');
+      const room = rooms.get(code);
+      if (!room) {
+        send(ws, { type: 'resume_failed', message: 'Цю гру не знайдено — можливо, вона вже завершилась.' });
+        return;
+      }
+      const foundKey = ['p1', 'p2'].find((k) => room.players[k] && room.players[k].token === token);
+      if (!foundKey) {
+        send(ws, { type: 'resume_failed', message: 'Не вдалося відновити сесію цієї гри.' });
+        return;
+      }
+      const me = room.players[foundKey];
+      me.ws = ws;
+      me.connected = true;
+      me.disconnectedAt = null;
+      roomCode = code;
+      myKey = foundKey;
+
+      send(ws, buildResumeSnapshot(room, foundKey));
+
+      const opp = room.players[otherKey(foundKey)];
+      if (opp && opp.connected) {
+        send(opp.ws, { type: 'opponent_reconnected' });
+      }
       return;
     }
 
@@ -300,6 +365,7 @@ wss.on('connection', (ws) => {
 
       if (win) {
         room.phase = 'over';
+        room.winner = myKey;
         broadcastRoom(room, { type: 'game_over', winner: myKey });
       }
       return;
@@ -323,19 +389,36 @@ wss.on('connection', (ws) => {
     const room = rooms.get(roomCode);
     if (!room) return;
     const me = room.players[myKey];
-    if (me) me.connected = false;
-    const opp = room.players[otherKey(myKey)];
+    if (!me) return;
+    // Only treat this as a real disconnect if no newer connection (a resume)
+    // has already taken over this seat.
+    if (me.ws !== ws) return;
+
+    me.connected = false;
+    me.disconnectedAt = Date.now();
+    const disconnectedKey = myKey;
+
+    const opp = room.players[otherKey(disconnectedKey)];
     if (opp && opp.connected) {
-      send(opp.ws, { type: 'opponent_disconnected' });
+      // Soft signal: the game keeps its state, just wait — the player may
+      // reconnect (page refresh, dropped wifi, closed tab by accident) within
+      // the grace window below.
+      send(opp.ws, { type: 'opponent_connection_lost' });
     }
-    // Clean up empty rooms after a delay
+
     setTimeout(() => {
       const r = rooms.get(roomCode);
       if (!r) return;
-      const p1gone = !r.players.p1 || !r.players.p1.connected;
-      const p2gone = !r.players.p2 || !r.players.p2.connected;
-      if (p1gone && p2gone) rooms.delete(roomCode);
-    }, 5 * 60 * 1000);
+      const stillGone = r.players[disconnectedKey];
+      if (!stillGone || stillGone.connected) return; // they came back — nothing to do
+
+      const stillOpp = r.players[otherKey(disconnectedKey)];
+      if (stillOpp && stillOpp.connected) {
+        send(stillOpp.ws, { type: 'opponent_gave_up' });
+      }
+      r.players[disconnectedKey] = null;
+      if (!r.players.p1 && !r.players.p2) rooms.delete(roomCode);
+    }, RECONNECT_GRACE_MS);
   });
 });
 

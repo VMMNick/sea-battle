@@ -7,6 +7,7 @@ const COLS = 'АБВГДЕЖЗИК'.split(''); // 10 letters for column labels
 // ---------- DOM helpers ----------
 const $ = (id) => document.getElementById(id);
 const screens = {
+  resuming: $('screen-resuming'),
   menu: $('screen-menu'),
   waiting: $('screen-waiting'),
   placement: $('screen-placement'),
@@ -21,15 +22,48 @@ function showScreen(name) {
 const statusBar = $('status-bar');
 function setStatus(text) { statusBar.textContent = text; }
 
+const oppBanner = $('opp-status-banner');
+function showOppBanner(text, ok) {
+  oppBanner.textContent = text;
+  oppBanner.classList.remove('hidden');
+  oppBanner.classList.toggle('ok', !!ok);
+}
+function hideOppBanner() {
+  oppBanner.classList.add('hidden');
+}
+
+// ---------- Saved session (survives accidental tab close / refresh / dropped wifi) ----------
+const SESSION_KEY = 'seabattle_session';
+function saveSession(data) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* ignore (private mode etc.) */ }
+}
+function loadSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+}
+
 // ---------- WebSocket ----------
 const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 let ws;
 let myPlayer = null; // 'p1' | 'p2'
 let roomCode = null;
+let hasHydrated = false; // true once the current screen has been built from real server state
 
 function connect() {
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.addEventListener('open', () => setStatus('Підключено до сервера'));
+  ws.addEventListener('open', () => {
+    setStatus('Підключено до сервера');
+    const saved = loadSession();
+    if (saved && saved.code && saved.token) {
+      showScreen('resuming');
+      sendMsg({ type: 'resume', code: saved.code, token: saved.token });
+    }
+  });
   ws.addEventListener('close', () => {
     setStatus('З’єднання втрачено. Перепідключення…');
     setTimeout(connect, 2000);
@@ -39,6 +73,12 @@ function connect() {
     const msg = JSON.parse(ev.data);
     handleMessage(msg);
   });
+}
+
+// Show the "resuming" screen immediately (before the socket even connects) so
+// returning players don't see a flash of the main menu first.
+if (loadSession()) {
+  showScreen('resuming');
 }
 connect();
 
@@ -71,6 +111,9 @@ $('btn-copy-code').addEventListener('click', () => {
 function backToMenu() {
   myPlayer = null;
   roomCode = null;
+  hasHydrated = false;
+  clearSession();
+  hideOppBanner();
   $('input-code').value = '';
   $('menu-error').textContent = '';
   showScreen('menu');
@@ -97,6 +140,19 @@ function resetPlacement() {
   buildOwnGrid();
   $('btn-ready').disabled = true;
   $('opp-ready-note').classList.add('hidden');
+}
+
+// Rebuild the placement screen showing an already-submitted fleet as read-only
+// (used when resuming a session where this player had already clicked "Готово").
+function restorePlacementReady(shipsCells) {
+  placedShips = shipsCells.map((cells) => ({ cells }));
+  occupiedSet = new Set();
+  placedShips.forEach((s) => s.cells.forEach(([r, c]) => occupiedSet.add(`${r},${c}`)));
+  rotation = 'h';
+  shipQueue = [];
+  renderFleetStatus();
+  buildOwnGrid();
+  $('btn-ready').disabled = true;
 }
 
 function renderFleetStatus() {
@@ -311,6 +367,50 @@ function buildBattleGrids() {
   updateTurnUI();
 }
 
+// Rebuild the battle screen from a server-provided snapshot (used on resume):
+// replays every past shot on both boards so the UI looks exactly as it did
+// before the player disconnected.
+function buildBattleGridsFromSnapshot(msg) {
+  placedShips = (msg.myShips || []).map((cells) => ({ cells }));
+  buildBattleGrids();
+
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const against = msg.myShotsReceived[r][c];
+      if (against) {
+        const cls = against === 'miss' ? 'miss' : 'hit';
+        markCell(selfCellEl(r, c), cls);
+        ownShotsGrid[r][c] = cls;
+      }
+      const onOpp = msg.myShotsOnOpp[r][c];
+      if (onOpp) {
+        const cls = onOpp === 'miss' ? 'miss' : 'hit';
+        markCell(enemyCellEl(r, c), cls);
+        enemyShotsGrid[r][c] = cls;
+      }
+    }
+  }
+
+  // own ships that are fully hit get the "sunk" skull styling
+  for (const ship of placedShips) {
+    const allHit = ship.cells.every(([r, c]) => msg.myShotsReceived[r][c]);
+    if (allHit) {
+      ship.cells.forEach(([r, c]) => {
+        markCell(selfCellEl(r, c), 'sunk');
+        ownShotsGrid[r][c] = 'sunk';
+      });
+    }
+  }
+
+  // server tells us exactly which enemy ships we've sunk
+  (msg.sunkEnemyShips || []).forEach((cells) => {
+    cells.forEach(([r, c]) => {
+      markCell(enemyCellEl(r, c), 'sunk');
+      enemyShotsGrid[r][c] = 'sunk';
+    });
+  });
+}
+
 function selfCellEl(r, c) {
   return document.querySelector(`#grid-self .cell[data-r="${r}"][data-c="${c}"]`);
 }
@@ -345,6 +445,8 @@ function handleMessage(msg) {
     case 'created':
       myPlayer = msg.player;
       roomCode = msg.code;
+      hasHydrated = true;
+      saveSession({ code: msg.code, token: msg.token, player: msg.player });
       $('room-code').textContent = roomCode;
       showScreen('waiting');
       setStatus(`Кімната ${roomCode} створена. Ви — гравець 1.`);
@@ -353,6 +455,8 @@ function handleMessage(msg) {
     case 'joined':
       myPlayer = msg.player;
       roomCode = msg.code;
+      hasHydrated = true;
+      saveSession({ code: msg.code, token: msg.token, player: msg.player });
       setStatus(`Ви приєдналися до кімнати ${roomCode}. Ви — гравець 2.`);
       break;
 
@@ -360,8 +464,54 @@ function handleMessage(msg) {
       $('menu-error').textContent = msg.message;
       break;
 
+    case 'resumed': {
+      myPlayer = msg.player;
+      roomCode = msg.code;
+      hideOppBanner();
+      if (!msg.oppConnected && msg.oppPresent && (msg.phase === 'placement' || msg.phase === 'battle')) {
+        showOppBanner('Суперник наразі офлайн — очікуємо, поки він повернеться…');
+      }
+
+      if (msg.phase === 'waiting') {
+        $('room-code').textContent = roomCode;
+        showScreen('waiting');
+        setStatus(`Кімната ${roomCode}. Очікуємо суперника…`);
+      } else if (msg.phase === 'placement') {
+        if (msg.amReady && msg.myShips) {
+          restorePlacementReady(msg.myShips);
+        } else if (!hasHydrated || placedShips.length === 0) {
+          resetPlacement();
+        } // else: keep whatever the player was already placing locally (quiet reconnect)
+        $('opp-ready-note').classList.toggle('hidden', !msg.oppReady);
+        showScreen('placement');
+        setStatus('Розставте кораблі та натисніть «Готово».');
+      } else if (msg.phase === 'battle') {
+        myTurn = msg.turn === myPlayer;
+        buildBattleGridsFromSnapshot(msg);
+        showScreen('battle');
+        setStatus('Бій триває — з поверненням!');
+      } else if (msg.phase === 'over') {
+        const iWon = msg.winner === myPlayer;
+        $('over-title').textContent = iWon
+          ? '🎉 Перемога! Ви розгромили флот суперника.'
+          : '💥 Поразка. Ваш флот знищено.';
+        $('rematch-note').classList.add('hidden');
+        showScreen('over');
+        setStatus('Гру завершено.');
+      }
+      hasHydrated = true;
+      break;
+    }
+
+    case 'resume_failed':
+      clearSession();
+      backToMenu();
+      $('menu-error').textContent = msg.message;
+      break;
+
     case 'start_placement':
       resetPlacement();
+      hideOppBanner();
       showScreen('placement');
       setStatus('Розставте кораблі та натисніть «Готово».');
       break;
@@ -423,10 +573,24 @@ function handleMessage(msg) {
       $('rematch-note').classList.remove('hidden');
       break;
 
-    case 'opponent_disconnected':
-      setStatus('Суперник відключився.');
-      alert('Суперник відключився від гри.');
-      location.reload();
+    case 'opponent_connection_lost':
+      // Soft signal: the opponent's connection dropped, but the game state is
+      // preserved server-side — they have a few minutes to reconnect. Don't
+      // interrupt the current screen, just let the player know.
+      showOppBanner('Суперник тимчасово втратив з’єднання — очікуємо, поки він повернеться…');
+      break;
+
+    case 'opponent_reconnected':
+      showOppBanner('Суперник повернувся!', true);
+      setTimeout(hideOppBanner, 2500);
+      break;
+
+    case 'opponent_gave_up':
+      hideOppBanner();
+      clearSession();
+      setStatus('Суперник не повернувся вчасно — гру завершено.');
+      alert('Суперник не повернувся вчасно. Гру завершено.');
+      backToMenu();
       break;
 
     case 'opponent_left':
@@ -442,4 +606,7 @@ $('btn-rematch').addEventListener('click', () => {
   $('btn-rematch').disabled = true;
 });
 
-$('btn-menu').addEventListener('click', () => location.reload());
+$('btn-menu').addEventListener('click', () => {
+  clearSession();
+  location.reload();
+});

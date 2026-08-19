@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Морський бій онлайн</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%93%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>⚓ Морський бій</h1>
+  <div id="status-bar" class="status-bar">Підключення до сервера…</div>
+</header>
+
+<main id="app">
+
+  <!-- ЕКРАН: Головне меню -->
+  <section id="screen-menu" class="screen">
+    <div class="panel">
+      <h2>Створити гру</h2>
+      <p>Отримайте код і надішліть його другу, щоб пограти онлайн.</p>
+      <button id="btn-create" class="btn btn-primary">Створити нову гру</button>
+    </div>
+    <div class="panel">
+      <h2>Приєднатися до гри</h2>
+      <p>Введіть код кімнати, який вам надіслали.</p>
+      <div class="join-row">
+        <input id="input-code" maxlength="4" placeholder="КОД" autocomplete="off">
+        <button id="btn-join" class="btn btn-primary">Приєднатися</button>
+      </div>
+      <p id="menu-error" class="error-text"></p>
+    </div>
+  </section>
+
+  <!-- ЕКРАН: Очікування суперника -->
+  <section id="screen-waiting" class="screen hidden">
+    <div class="panel center">
+      <h2>Очікуємо суперника…</h2>
+      <p>Надішліть цей код другу:</p>
+      <div id="room-code" class="room-code"></div>
+      <button id="btn-copy-code" class="btn">Скопіювати код</button>
+      <div class="spinner"></div>
+    </div>
+  </section>
+
+  <!-- ЕКРАН: Розстановка кораблів -->
+  <section id="screen-placement" class="screen hidden">
+    <div class="panel center">
+      <h2>Розставте кораблі</h2>
+      <p class="hint">Клікніть на клітинку, щоб поставити корабель. Клавіша <b>R</b> або кнопка — обертання. Кораблі не можуть торкатися одне одного.</p>
+      <div class="fleet-status" id="fleet-status"></div>
+      <div class="placement-controls">
+        <button id="btn-rotate" class="btn">⟳ Обертати (R)</button>
+        <button id="btn-random" class="btn">🎲 Випадково</button>
+        <button id="btn-clear" class="btn">✕ Очистити</button>
+      </div>
+      <div id="grid-own" class="grid"></div>
+      <button id="btn-ready" class="btn btn-primary btn-wide" disabled>Готово, чекати суперника</button>
+      <p id="opp-ready-note" class="note hidden">Суперник вже готовий і чекає на вас!</p>
+    </div>
+  </section>
+
+  <!-- ЕКРАН: Бій -->
+  <section id="screen-battle" class="screen hidden">
+    <div class="battle-turn" id="battle-turn">Хід гравця…</div>
+    <div class="boards">
+      <div class="board-wrap">
+        <h3>Ваш флот</h3>
+        <div id="grid-self" class="grid grid-small"></div>
+      </div>
+      <div class="board-wrap">
+        <h3>Флот суперника</h3>
+        <div id="grid-enemy" class="grid"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ЕКРАН: Кінець гри -->
+  <section id="screen-over" class="screen hidden">
+    <div class="panel center">
+      <h2 id="over-title">Гру завершено</h2>
+      <button id="btn-rematch" class="btn btn-primary">Реванш</button>
+      <button id="btn-menu" class="btn">У головне меню</button>
+      <p id="rematch-note" class="note hidden">Суперник хоче реванш!</p>
+    </div>
+  </section>
+
+</main>
+
+<script src="client.js"></script>
+</body>
+</html>

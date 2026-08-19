@@ -1,0 +1,12 @@
+{
+  "name": "sea-battle",
+  "version": "1.0.0",
+  "description": "Онлайн гра Морський бій для двох гравців (WebSocket)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

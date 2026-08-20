@@ -86,6 +86,152 @@ function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
 }
 
+// ---------- Settings: sound & vibration on/off (saved across sessions) ----------
+const SETTINGS_KEY = 'seabattle_settings';
+function loadSettings() {
+  const defaults = { sound: true, vibration: true };
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+  } catch { return defaults; }
+}
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+}
+const settings = loadSettings();
+
+const vibrationSupported = typeof navigator !== 'undefined' && 'vibrate' in navigator;
+
+(function initSettingsUI() {
+  const btn = $('btn-settings');
+  const panel = $('settings-panel');
+  const soundToggle = $('toggle-sound');
+  const vibToggle = $('toggle-vibration');
+
+  soundToggle.checked = settings.sound;
+  vibToggle.checked = settings.vibration;
+
+  if (!vibrationSupported) {
+    vibToggle.checked = false;
+    vibToggle.disabled = true;
+    const row = vibToggle.closest('.settings-row');
+    row.classList.add('disabled-row');
+    row.title = 'Вібрація не підтримується цим пристроєм чи браузером';
+  }
+
+  soundToggle.addEventListener('change', () => {
+    settings.sound = soundToggle.checked;
+    saveSettings();
+  });
+  vibToggle.addEventListener('change', () => {
+    settings.vibration = vibToggle.checked;
+    saveSettings();
+  });
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    panel.classList.toggle('hidden');
+  });
+  document.addEventListener('click', (e) => {
+    if (!panel.classList.contains('hidden') && e.target !== btn && !panel.contains(e.target)) {
+      panel.classList.add('hidden');
+    }
+  });
+})();
+
+// ---------- Sound effects (synthesized — no audio files to load/host) ----------
+let audioCtx = null;
+function ensureAudioCtx() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  if (!audioCtx) audioCtx = new AC();
+  if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+  return audioCtx;
+}
+
+function playTone({ freqStart, freqEnd, duration, type = 'sine', volume = 0.25, delay = 0 }) {
+  const ctx = ensureAudioCtx();
+  if (!ctx) return;
+  const t0 = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freqStart, t0);
+  if (freqEnd !== undefined) osc.frequency.exponentialRampToValueAtTime(Math.max(freqEnd, 1), t0 + duration);
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(volume, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + duration + 0.03);
+}
+
+function playNoiseBurst({ duration = 0.3, volume = 0.3, filterFreq = 1000, filterType = 'lowpass', delay = 0 }) {
+  const ctx = ensureAudioCtx();
+  if (!ctx) return;
+  const t0 = ctx.currentTime + delay;
+  const bufferSize = Math.max(1, Math.floor(ctx.sampleRate * duration));
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = filterType;
+  filter.frequency.value = filterFreq;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(volume, t0);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+  noise.connect(filter).connect(gain).connect(ctx.destination);
+  noise.start(t0);
+  noise.stop(t0 + duration + 0.03);
+}
+
+function playSound(fn) {
+  if (!settings.sound) return;
+  try { fn(); } catch { /* audio can fail silently (autoplay policy etc.) — never break gameplay */ }
+}
+
+const sfx = {
+  fire: () => playSound(() => {
+    playTone({ freqStart: 950, freqEnd: 180, duration: 0.14, type: 'sawtooth', volume: 0.18 });
+    playNoiseBurst({ duration: 0.08, volume: 0.12, filterFreq: 2500, filterType: 'highpass' });
+  }),
+  miss: () => playSound(() => {
+    playNoiseBurst({ duration: 0.22, volume: 0.16, filterFreq: 1400, filterType: 'bandpass' });
+    playTone({ freqStart: 500, freqEnd: 140, duration: 0.15, type: 'sine', volume: 0.1 });
+  }),
+  hit: () => playSound(() => {
+    playNoiseBurst({ duration: 0.32, volume: 0.32, filterFreq: 700, filterType: 'lowpass' });
+    playTone({ freqStart: 160, freqEnd: 35, duration: 0.28, type: 'sine', volume: 0.28 });
+  }),
+  hitOnMe: () => playSound(() => {
+    playNoiseBurst({ duration: 0.3, volume: 0.3, filterFreq: 550, filterType: 'lowpass' });
+    playTone({ freqStart: 130, freqEnd: 30, duration: 0.3, type: 'sine', volume: 0.3 });
+  }),
+  sunk: () => playSound(() => {
+    playNoiseBurst({ duration: 0.4, volume: 0.36, filterFreq: 500, filterType: 'lowpass' });
+    playTone({ freqStart: 180, freqEnd: 30, duration: 0.35, type: 'sine', volume: 0.32 });
+    playNoiseBurst({ duration: 0.35, volume: 0.28, filterFreq: 350, filterType: 'lowpass', delay: 0.12 });
+    playTone({ freqStart: 300, freqEnd: 50, duration: 0.5, type: 'triangle', volume: 0.16, delay: 0.15 });
+  }),
+  win: () => playSound(() => {
+    [523, 659, 784, 1047].forEach((f, i) => {
+      playTone({ freqStart: f, duration: 0.22, type: 'triangle', volume: 0.22, delay: i * 0.11 });
+    });
+  }),
+  lose: () => playSound(() => {
+    [392, 349, 294, 220].forEach((f, i) => {
+      playTone({ freqStart: f, freqEnd: f * 0.9, duration: 0.32, type: 'sawtooth', volume: 0.18, delay: i * 0.16 });
+    });
+  }),
+};
+
+function vibrate(pattern) {
+  if (!settings.vibration || !vibrationSupported) return;
+  try { navigator.vibrate(pattern); } catch { /* ignore */ }
+}
+
 // ---------- WebSocket ----------
 const proto = location.protocol === 'https:' ? 'wss' : 'ws';
 let ws;
@@ -474,6 +620,8 @@ function updateTurnUI() {
 function fireAt(r, c) {
   if (!myTurn) return;
   if (enemyShotsGrid[r][c]) return;
+  sfx.fire();
+  vibrate(15); // tiny tactile tick on the tap itself
   sendMsg({ type: 'fire', r, c });
 }
 
@@ -641,12 +789,23 @@ function handleMessage(msg) {
           spawnImpactFx(el, 'sunk');
         });
         paintShipHull(cells, cellFor); // own ships are already painted; this reveals a sunk enemy hull
+        sfx.sunk();
+        vibrate(iAmShooter ? [50, 40, 50, 40, 100] : [80, 50, 80, 50, 150]);
       } else {
         const cls = result === 'miss' ? 'miss' : 'hit';
         const el = cellFor(r, c);
         markCell(el, cls);
         gridFor[r][c] = cls;
         spawnImpactFx(el, cls);
+        if (cls === 'miss') {
+          sfx.miss();
+        } else if (iAmShooter) {
+          sfx.hit();
+          vibrate(60);
+        } else {
+          sfx.hitOnMe();
+          vibrate(90);
+        }
       }
       myTurn = turn === myPlayer;
       updateTurnUI();
@@ -659,6 +818,13 @@ function handleMessage(msg) {
       $('rematch-note').classList.add('hidden');
       showScreen('over');
       setStatus('Гру завершено.');
+      if (iWon) {
+        sfx.win();
+        vibrate([100, 50, 100, 50, 200]);
+      } else {
+        sfx.lose();
+        vibrate(300);
+      }
       break;
     }
 

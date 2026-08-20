@@ -10,6 +10,17 @@
 <body>
 
 <header>
+  <button id="btn-settings" class="btn-icon" type="button" aria-label="Налаштування звуку та вібрації" title="Налаштування">⚙️</button>
+  <div id="settings-panel" class="settings-panel hidden">
+    <label class="settings-row">
+      <input type="checkbox" id="toggle-sound">
+      <span>🔊 Звук</span>
+    </label>
+    <label class="settings-row">
+      <input type="checkbox" id="toggle-vibration">
+      <span>📳 Вібрація</span>
+    </label>
+  </div>
   <h1>⚓ Морський бій</h1>
   <div id="status-bar" class="status-bar">Підключення до сервера…</div>
   <div id="opp-status-banner" class="opp-status-banner hidden"></div>

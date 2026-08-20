@@ -146,6 +146,34 @@ h1 {
   margin-top: 0;
 }
 
+/* Create-game and play-vs-bot sit side by side as two matched cards —
+   the two ways to start a match right now, facing each other. */
+.menu-primary-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+  margin-bottom: 16px;
+}
+
+.menu-card {
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  margin-bottom: 0;
+  border-top: 3px solid var(--accent);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.menu-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+.menu-card p {
+  flex: 1;
+  color: var(--text-dim);
+}
+.menu-card:last-child { border-top-color: #8a6bf0; }
+
 .join-row {
   display: flex;
   gap: 8px;
@@ -486,6 +514,10 @@ h1 {
 
 @media (max-width: 700px) {
   .boards { gap: 16px; }
+}
+
+@media (max-width: 640px) {
+  .menu-primary-row { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {

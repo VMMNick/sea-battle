@@ -181,6 +181,14 @@ h1 {
 }
 .btn-cancel:hover { background: #3a1919; border-color: #6a2f2f; }
 
+.btn-bot {
+  background: #2a1f4a;
+  border-color: #4a3a7a;
+  color: #cbb8ff;
+  font-weight: 600;
+}
+.btn-bot:hover { background: #34266a; }
+
 .hint { color: var(--text-dim); font-size: 0.88rem; }
 .note { color: var(--ok); font-weight: 600; }
 

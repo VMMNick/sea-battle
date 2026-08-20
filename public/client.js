@@ -53,6 +53,11 @@ let ws;
 let myPlayer = null; // 'p1' | 'p2'
 let roomCode = null;
 let hasHydrated = false; // true once the current screen has been built from real server state
+let vsBot = false;
+
+function setEnemyBoardTitle() {
+  $('enemy-board-title').textContent = vsBot ? 'Флот бота 🤖' : 'Флот суперника';
+}
 
 function connect() {
   ws = new WebSocket(`${proto}://${location.host}`);
@@ -91,6 +96,10 @@ $('btn-create').addEventListener('click', () => {
   $('menu-error').textContent = '';
   sendMsg({ type: 'create' });
 });
+$('btn-create-bot').addEventListener('click', () => {
+  $('menu-error').textContent = '';
+  sendMsg({ type: 'create_bot' });
+});
 $('btn-join').addEventListener('click', joinRoom);
 $('input-code').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') joinRoom();
@@ -112,6 +121,7 @@ function backToMenu() {
   myPlayer = null;
   roomCode = null;
   hasHydrated = false;
+  vsBot = false;
   clearSession();
   hideOppBanner();
   $('input-code').value = '';
@@ -446,6 +456,8 @@ function handleMessage(msg) {
       myPlayer = msg.player;
       roomCode = msg.code;
       hasHydrated = true;
+      vsBot = false;
+      setEnemyBoardTitle();
       saveSession({ code: msg.code, token: msg.token, player: msg.player });
       $('room-code').textContent = roomCode;
       showScreen('waiting');
@@ -456,8 +468,22 @@ function handleMessage(msg) {
       myPlayer = msg.player;
       roomCode = msg.code;
       hasHydrated = true;
+      vsBot = false;
+      setEnemyBoardTitle();
       saveSession({ code: msg.code, token: msg.token, player: msg.player });
       setStatus(`Ви приєдналися до кімнати ${roomCode}. Ви — гравець 2.`);
+      break;
+
+    case 'bot_created':
+      myPlayer = msg.player;
+      roomCode = msg.code;
+      hasHydrated = true;
+      vsBot = true;
+      saveSession({ code: msg.code, token: msg.token, player: msg.player, vsBot: true });
+      setEnemyBoardTitle();
+      resetPlacement();
+      showScreen('placement');
+      setStatus('Гра проти бота. Розставте кораблі та натисніть «Готово».');
       break;
 
     case 'error':
@@ -467,6 +493,8 @@ function handleMessage(msg) {
     case 'resumed': {
       myPlayer = msg.player;
       roomCode = msg.code;
+      vsBot = !!msg.oppIsBot;
+      setEnemyBoardTitle();
       hideOppBanner();
       if (!msg.oppConnected && msg.oppPresent && (msg.phase === 'placement' || msg.phase === 'battle')) {
         showOppBanner('Суперник наразі офлайн — очікуємо, поки він повернеться…');

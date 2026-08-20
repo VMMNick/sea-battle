@@ -116,6 +116,54 @@ function validateShips(ships) {
   return ships.map((s) => ({ cells: s.cells, hits: new Set() }));
 }
 
+// Generates a random, rules-legal fleet (no overlaps, no touching ships) —
+// used to auto-place the bot's ships. Re-validated through validateShips so
+// the bot is held to exactly the same rules as a human player.
+function generateRandomShips() {
+  const occupied = new Set();
+  const placed = [];
+  function neighbors(cells) {
+    const set = new Set();
+    for (const [r, c] of cells) {
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr, nc = c + dc;
+          if (inBounds(nr, nc)) set.add(`${nr},${nc}`);
+        }
+      }
+    }
+    return set;
+  }
+  function canPlace(cells) {
+    for (const [r, c] of cells) {
+      if (!inBounds(r, c) || occupied.has(`${r},${c}`)) return false;
+    }
+    for (const key of neighbors(cells)) {
+      if (occupied.has(key) && !cells.some(([r, c]) => `${r},${c}` === key)) return false;
+    }
+    return true;
+  }
+  for (const len of SHIP_LENGTHS) {
+    let ok = false;
+    let attempts = 0;
+    while (!ok && attempts < 2000) {
+      attempts++;
+      const horiz = Math.random() < 0.5;
+      const r = crypto.randomInt(SIZE);
+      const c = crypto.randomInt(SIZE);
+      const cells = [];
+      for (let i = 0; i < len; i++) cells.push(horiz ? [r, c + i] : [r + i, c]);
+      if (canPlace(cells)) {
+        placed.push({ cells });
+        cells.forEach(([r, c]) => occupied.add(`${r},${c}`));
+        ok = true;
+      }
+    }
+    if (!ok) return generateRandomShips(); // extremely unlikely; just retry from scratch
+  }
+  return placed;
+}
+
 function makeRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code;
@@ -142,6 +190,191 @@ function newPlayer(ws) {
   };
 }
 
+function newBotPlayer() {
+  return {
+    ws: null,
+    isBot: true,
+    token: null,
+    ships: null,
+    shotsReceived: emptyGrid(),
+    ready: false,
+    rematchWanted: true, // the bot always accepts a rematch instantly
+    connected: true, // a bot is never "disconnected"
+    disconnectedAt: null,
+    ai: freshBotAI(),
+  };
+}
+
+// A room where the opponent seat is a bot player rather than a real socket.
+function roomShouldBeDeleted(room) {
+  const p1 = room.players.p1;
+  const p2 = room.players.p2;
+  const p1Real = p1 && !p1.isBot;
+  const p2Real = p2 && !p2.isBot;
+  return !p1Real && !p2Real;
+}
+
+// ---------- Bot AI (probability-density hunt / directional target) ----------
+// kept in sync manually with test/bot-ai-sim.js
+
+function freshBotAI() {
+  return {
+    mode: 'hunt',
+    hits: [],
+    queue: [],
+    direction: null,
+    remaining: [...SHIP_LENGTHS], // lengths of ships not yet confirmed sunk
+    dead: new Set(), // cells known empty (no-touch buffer around sunk ships) — never worth firing at
+  };
+}
+
+function botBlocked(tried, ai, r, c) {
+  if (!inBounds(r, c)) return true;
+  if (tried[r][c]) return true;
+  if (ai.dead.has(`${r},${c}`)) return true;
+  return false;
+}
+
+// Picks the bot's next shot against `target` (the human player object),
+// using its own shotsReceived grid as the source of truth for "already tried".
+function pickBotMove(target, ai) {
+  const tried = target.shotsReceived;
+
+  // Target mode: we have a live hit and are hunting down the rest of that ship.
+  while (ai.mode === 'target' && ai.queue.length) {
+    const [r, c] = ai.queue.shift();
+    if (!botBlocked(tried, ai, r, c)) return [r, c];
+  }
+  if (ai.mode === 'target' && !ai.queue.length) {
+    // ran out of leads without sinking the ship (edge of board) — fall back to hunting
+    ai.mode = 'hunt';
+    ai.hits = [];
+    ai.direction = null;
+  }
+
+  // Hunt mode: probability-density search. For every remaining (not-yet-sunk)
+  // ship length, count how many horizontal/vertical placements could still fit
+  // through each untried cell (skipping cells already fired on or known dead
+  // from the no-touch rule around sunk ships), then fire at a cell with the
+  // highest count. This is the classic "heatmap" approach and meaningfully
+  // outperforms blind/checkerboard hunting, especially once ships start getting
+  // sunk and their dead zones shrink the search space.
+  const lengths = ai.remaining.length ? ai.remaining : SHIP_LENGTHS;
+  const scores = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+  const cellBlocked = (r, c) => !!tried[r][c] || ai.dead.has(`${r},${c}`);
+  let anyScore = false;
+  for (const len of lengths) {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c <= SIZE - len; c++) {
+        let fits = true;
+        for (let i = 0; i < len; i++) {
+          if (cellBlocked(r, c + i)) { fits = false; break; }
+        }
+        if (!fits) continue;
+        for (let i = 0; i < len; i++) { scores[r][c + i]++; anyScore = true; }
+      }
+    }
+    if (len > 1) {
+      for (let c = 0; c < SIZE; c++) {
+        for (let r = 0; r <= SIZE - len; r++) {
+          let fits = true;
+          for (let i = 0; i < len; i++) {
+            if (cellBlocked(r + i, c)) { fits = false; break; }
+          }
+          if (!fits) continue;
+          for (let i = 0; i < len; i++) { scores[r + i][c]++; anyScore = true; }
+        }
+      }
+    }
+  }
+  const bestCells = [];
+  let best = -1;
+  if (anyScore) {
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (cellBlocked(r, c)) continue;
+        const s = scores[r][c];
+        if (s > best) { best = s; bestCells.length = 0; bestCells.push([r, c]); }
+        else if (s === best) bestCells.push([r, c]);
+      }
+    }
+  } else {
+    // Shouldn't normally happen (would mean our bookkeeping is out of sync),
+    // but never leave the bot stuck — fall back to any untried, non-dead cell.
+    for (let r = 0; r < SIZE; r++) {
+      for (let c = 0; c < SIZE; c++) {
+        if (!cellBlocked(r, c)) bestCells.push([r, c]);
+      }
+    }
+  }
+  if (!bestCells.length) return null; // board fully tried (shouldn't happen before game ends)
+  return bestCells[crypto.randomInt(bestCells.length)];
+}
+
+// Marks every cell touching (including diagonally) the given ship's cells as
+// "dead" — guaranteed empty, since ships can never touch under this game's
+// placement rules. Lets the hunt phase skip them without wasting a real shot.
+function markDeadAround(ai, cells) {
+  for (const [r, c] of cells) {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        const nr = r + dr, nc = c + dc;
+        if (inBounds(nr, nc)) ai.dead.add(`${nr},${nc}`);
+      }
+    }
+  }
+}
+
+// Updates the bot's AI state after seeing the result of its own shot.
+function updateBotAI(ai, r, c, result) {
+  if (result === 'sunk' || result === 'win') {
+    const shipCells = [...ai.hits, [r, c]];
+    const sunkLen = shipCells.length;
+    const idx = ai.remaining.indexOf(sunkLen);
+    if (idx !== -1) ai.remaining.splice(idx, 1);
+    markDeadAround(ai, shipCells);
+    ai.mode = 'hunt';
+    ai.hits = [];
+    ai.queue = [];
+    ai.direction = null;
+    return;
+  }
+  if (result === 'miss') {
+    // if we were following a discovered direction, dropping a miss just means
+    // "stop extending that end" — the queue naturally moves on to other leads.
+    return;
+  }
+  // hit, ship not yet sunk
+  ai.hits.push([r, c]);
+  if (ai.hits.length === 1) {
+    ai.mode = 'target';
+    ai.direction = null;
+    const candidates = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = crypto.randomInt(i + 1);
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+    }
+    ai.queue = candidates;
+    return;
+  }
+  if (!ai.direction) {
+    const [fr, fc] = ai.hits[0];
+    ai.direction = fr === r ? 'h' : 'v';
+    // once we know the line, drop candidates that don't lie on it
+    ai.queue = ai.queue.filter(([qr, qc]) => (ai.direction === 'h' ? qr === fr : qc === fc));
+  }
+  // extend further past this new hit, in the same direction
+  const rows = ai.hits.map(([hr]) => hr);
+  const cols = ai.hits.map(([, hc]) => hc);
+  if (ai.direction === 'h') {
+    const row = rows[0];
+    ai.queue.push([row, Math.min(...cols) - 1], [row, Math.max(...cols) + 1]);
+  } else {
+    const col = cols[0];
+    ai.queue.push([Math.min(...rows) - 1, col], [Math.max(...rows) + 1, col]);
+  }
+}
+
 // What a reconnecting client needs to fully rebuild the UI it left behind.
 function buildResumeSnapshot(room, myKey) {
   const me = room.players[myKey];
@@ -164,6 +397,7 @@ function buildResumeSnapshot(room, myKey) {
     oppConnected: !!(opp && opp.connected),
     oppReady: !!(opp && opp.ready),
     oppPresent: !!opp,
+    oppIsBot: !!(opp && opp.isBot),
   };
 }
 
@@ -188,6 +422,71 @@ function allShipsSunk(player) {
   return player.ships.every((s) => s.hits.size === s.cells.length);
 }
 
+// Core of a single shot, shared by human 'fire' messages and the bot's
+// automated moves so both are governed by exactly the same rules.
+function performFire(room, shooterKey, r, c) {
+  const opp = room.players[otherKey(shooterKey)];
+
+  let result = 'miss';
+  let sunkShip = null;
+  for (const ship of opp.ships) {
+    if (ship.cells.some(([sr, sc]) => sr === r && sc === c)) {
+      ship.hits.add(`${r},${c}`);
+      result = ship.hits.size === ship.cells.length ? 'sunk' : 'hit';
+      if (result === 'sunk') sunkShip = ship;
+      break;
+    }
+  }
+  opp.shotsReceived[r][c] = result === 'miss' ? 'miss' : 'hit';
+
+  const win = result !== 'miss' && allShipsSunk(opp);
+  if (result === 'miss') {
+    room.turn = otherKey(shooterKey);
+  }
+  // on hit or sunk, same player continues (turn unchanged)
+
+  broadcastRoom(room, {
+    type: 'fire_result',
+    by: shooterKey,
+    r,
+    c,
+    result: win ? 'win' : result,
+    shipCells: sunkShip ? sunkShip.cells : undefined,
+    turn: room.turn,
+  });
+
+  if (win) {
+    room.phase = 'over';
+    room.winner = shooterKey;
+    broadcastRoom(room, { type: 'game_over', winner: shooterKey });
+  }
+
+  return { result: win ? 'win' : result, win };
+}
+
+// If it's the bot's turn, schedule its next shot after a short human-feeling
+// delay. Safe to call unconditionally after any state change.
+function scheduleBotMove(room) {
+  if (room.phase !== 'battle') return;
+  const botKey = ['p1', 'p2'].find((k) => room.players[k] && room.players[k].isBot);
+  if (!botKey || room.turn !== botKey) return;
+  const bot = room.players[botKey];
+  const target = room.players[otherKey(botKey)];
+  if (!target) return;
+
+  setTimeout(() => {
+    // re-check everything: the room/game may have moved on while we waited
+    if (room.phase !== 'battle' || room.turn !== botKey) return;
+    if (!rooms.get(room.code) || rooms.get(room.code) !== room) return;
+    const move = pickBotMove(target, bot.ai);
+    if (!move) return;
+    const [r, c] = move;
+    const { result } = performFire(room, botKey, r, c);
+    updateBotAI(bot.ai, r, c, result);
+    scheduleBotMove(room); // keeps firing on its own turn (hit → shoot again)
+  }, 550 + crypto.randomInt(450));
+}
+
 function resetRoomForRematch(room) {
   for (const key of ['p1', 'p2']) {
     const p = room.players[key];
@@ -195,6 +494,7 @@ function resetRoomForRematch(room) {
     p.ships = null;
     p.shotsReceived = emptyGrid();
     p.ready = false;
+    if (p.isBot) p.ai = freshBotAI();
   }
   room.phase = 'placement';
   room.turn = 'p1';
@@ -230,6 +530,21 @@ wss.on('connection', (ws) => {
       roomCode = code;
       myKey = 'p1';
       send(ws, { type: 'created', code, player: 'p1', token: room.players.p1.token });
+      return;
+    }
+
+    if (msg.type === 'create_bot') {
+      const code = makeRoomCode();
+      const room = {
+        code,
+        players: { p1: newPlayer(ws), p2: newBotPlayer() },
+        phase: 'placement', // the "seat" is already filled, so skip the waiting room entirely
+        turn: 'p1',
+      };
+      rooms.set(code, room);
+      roomCode = code;
+      myKey = 'p1';
+      send(ws, { type: 'bot_created', code, player: 'p1', token: room.players.p1.token });
       return;
     }
 
@@ -288,8 +603,8 @@ wss.on('connection', (ws) => {
         if (room) {
           const opp = room.players[otherKey(myKey)];
           room.players[myKey] = null;
-          if (opp) send(opp.ws, { type: 'opponent_left' });
-          if (!room.players.p1 && !room.players.p2) rooms.delete(roomCode);
+          if (opp && !opp.isBot) send(opp.ws, { type: 'opponent_left' });
+          if (roomShouldBeDeleted(room)) rooms.delete(roomCode);
         }
       }
       roomCode = null;
@@ -312,12 +627,19 @@ wss.on('connection', (ws) => {
       me.ships = validated;
       me.ready = true;
       send(ws, { type: 'placement_ok' });
-      if (opp) send(opp.ws, { type: 'opponent_ready' });
+
+      if (opp && opp.isBot && !opp.ready) {
+        opp.ships = validateShips(generateRandomShips());
+        opp.ready = true;
+      } else if (opp) {
+        send(opp.ws, { type: 'opponent_ready' });
+      }
 
       if (opp && me.ready && opp.ready) {
         room.phase = 'battle';
         room.turn = 'p1';
         broadcastRoom(room, { type: 'battle_start', turn: room.turn });
+        scheduleBotMove(room);
       }
       return;
     }
@@ -335,43 +657,17 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      let result = 'miss';
-      let sunkShip = null;
-      for (const ship of opp.ships) {
-        if (ship.cells.some(([sr, sc]) => sr === r && sc === c)) {
-          ship.hits.add(`${r},${c}`);
-          result = ship.hits.size === ship.cells.length ? 'sunk' : 'hit';
-          if (result === 'sunk') sunkShip = ship;
-          break;
-        }
-      }
-      opp.shotsReceived[r][c] = result === 'miss' ? 'miss' : 'hit';
-
-      const win = result !== 'miss' && allShipsSunk(opp);
-      if (result === 'miss') {
-        room.turn = otherKey(myKey);
-      }
-      // on hit or sunk, same player continues (turn unchanged)
-
-      broadcastRoom(room, {
-        type: 'fire_result',
-        by: myKey,
-        r,
-        c,
-        result: win ? 'win' : result,
-        shipCells: sunkShip ? sunkShip.cells : undefined,
-        turn: room.turn,
-      });
-
-      if (win) {
-        room.phase = 'over';
-        room.winner = myKey;
-        broadcastRoom(room, { type: 'game_over', winner: myKey });
-      }
+      performFire(room, myKey, r, c);
+      scheduleBotMove(room);
       return;
     }
 
     if (msg.type === 'rematch') {
+      if (opp && opp.isBot) {
+        resetRoomForRematch(room);
+        broadcastRoom(room, { type: 'start_placement' });
+        return;
+      }
       me.rematchWanted = true;
       if (opp) send(opp.ws, { type: 'opponent_wants_rematch' });
       if (opp && opp.rematchWanted) {
@@ -417,7 +713,7 @@ wss.on('connection', (ws) => {
         send(stillOpp.ws, { type: 'opponent_gave_up' });
       }
       r.players[disconnectedKey] = null;
-      if (!r.players.p1 && !r.players.p2) rooms.delete(roomCode);
+      if (roomShouldBeDeleted(r)) rooms.delete(roomCode);
     }, RECONNECT_GRACE_MS);
   });
 });

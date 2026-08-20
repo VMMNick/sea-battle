@@ -449,6 +449,39 @@ function markCell(el, cls) {
   el.classList.add(cls);
 }
 
+// Plays a one-shot explosion/splash/sinking animation over a cell. Purely
+// cosmetic — only called for shots that just happened live, never when
+// silently rebuilding the board after a resume/reload.
+function spawnImpactFx(el, kind) {
+  if (!el) return;
+  const fx = document.createElement('div');
+  fx.className = `fx fx-${kind}`;
+  if (kind === 'miss') {
+    fx.innerHTML = '<span class="fx-splash-ring"></span><span class="fx-splash-ring fx-splash-ring2"></span>';
+  } else {
+    const sparkCount = kind === 'sunk' ? 8 : 6;
+    let sparks = '';
+    for (let i = 0; i < sparkCount; i++) {
+      sparks += `<span class="fx-spark" style="--angle:${Math.round((360 / sparkCount) * i)}deg"></span>`;
+    }
+    let bubbles = '';
+    if (kind === 'sunk') {
+      for (let i = 0; i < 4; i++) {
+        bubbles += `<span class="fx-bubble" style="--bx:${15 + i * 22}%; animation-delay:${260 + i * 90}ms"></span>`;
+      }
+    }
+    fx.innerHTML = `<span class="fx-ring"></span><span class="fx-core"></span>${sparks}${bubbles}`;
+  }
+  el.appendChild(fx);
+  const impactClass = kind === 'sunk' ? 'impact-sunk' : kind === 'hit' ? 'impact-hit' : 'impact-miss';
+  el.classList.add(impactClass);
+  const cleanupDelay = kind === 'sunk' ? 900 : 550;
+  setTimeout(() => {
+    fx.remove();
+    el.classList.remove(impactClass);
+  }, cleanupDelay);
+}
+
 // ---------- Message handling ----------
 function handleMessage(msg) {
   switch (msg.type) {
@@ -562,26 +595,22 @@ function handleMessage(msg) {
     case 'fire_result': {
       const { by, r, c, result, shipCells, turn } = msg;
       const iAmShooter = by === myPlayer;
-      if (iAmShooter) {
-        const cls = result === 'miss' ? 'miss' : 'hit';
-        markCell(enemyCellEl(r, c), cls);
-        enemyShotsGrid[r][c] = cls;
-        if (result === 'sunk' || result === 'win') {
-          (shipCells || []).forEach(([sr, sc]) => {
-            markCell(enemyCellEl(sr, sc), 'sunk');
-            enemyShotsGrid[sr][sc] = 'sunk';
-          });
-        }
+      const cellFor = iAmShooter ? enemyCellEl : selfCellEl;
+      const gridFor = iAmShooter ? enemyShotsGrid : ownShotsGrid;
+      if (result === 'sunk' || result === 'win') {
+        // reveal + animate every cell of the ship that just went down
+        (shipCells && shipCells.length ? shipCells : [[r, c]]).forEach(([sr, sc]) => {
+          const el = cellFor(sr, sc);
+          markCell(el, 'sunk');
+          gridFor[sr][sc] = 'sunk';
+          spawnImpactFx(el, 'sunk');
+        });
       } else {
         const cls = result === 'miss' ? 'miss' : 'hit';
-        markCell(selfCellEl(r, c), cls);
-        ownShotsGrid[r][c] = cls;
-        if (result === 'sunk' || result === 'win') {
-          (shipCells || []).forEach(([sr, sc]) => {
-            markCell(selfCellEl(sr, sc), 'sunk');
-            ownShotsGrid[sr][sc] = 'sunk';
-          });
-        }
+        const el = cellFor(r, c);
+        markCell(el, cls);
+        gridFor[r][c] = cls;
+        spawnImpactFx(el, cls);
       }
       myTurn = turn === myPlayer;
       updateTurnUI();

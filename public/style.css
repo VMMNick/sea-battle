@@ -257,6 +257,118 @@ h1 {
 .grid-enemy .cell:hover { background: #1a4a78; }
 .grid-enemy .cell.disabled { cursor: default; }
 
+/* ---------- Постріл: вибух / сплеск / потоплення ---------- */
+
+.cell.impact-hit { animation: cellShake 340ms ease-in-out; }
+.cell.impact-sunk { animation: cellShakeStrong 520ms ease-in-out; }
+
+@keyframes cellShake {
+  0%, 100% { transform: translate(0, 0); }
+  20% { transform: translate(-2px, 1px); }
+  40% { transform: translate(2px, -1px); }
+  60% { transform: translate(-1px, 2px); }
+  80% { transform: translate(1px, -1px); }
+}
+@keyframes cellShakeStrong {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  15% { transform: translate(-3px, 2px) rotate(-2deg); }
+  30% { transform: translate(3px, -2px) rotate(2deg); }
+  45% { transform: translate(-3px, 1px) rotate(-1deg); }
+  60% { transform: translate(2px, -2px) rotate(1deg); }
+  80% { transform: translate(-1px, 1px) rotate(0); }
+}
+
+.fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+}
+
+.fx-hit .fx-core, .fx-sunk .fx-core {
+  position: absolute;
+  width: 70%;
+  height: 70%;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff6c8 0%, #ffcf5c 30%, #ff8a2b 55%, #ff3d3d 75%, transparent 78%);
+  animation: fxCore 420ms ease-out forwards;
+}
+.fx-hit .fx-ring, .fx-sunk .fx-ring {
+  position: absolute;
+  width: 95%;
+  height: 95%;
+  border-radius: 50%;
+  border: 3px solid #ffb347;
+  animation: fxRing 420ms ease-out forwards;
+}
+.fx-sunk .fx-core { width: 88%; height: 88%; }
+.fx-sunk .fx-ring { border-color: #ff5c5c; border-width: 4px; animation-duration: 520ms; }
+
+.fx-spark {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #ffb347;
+  top: 50%;
+  left: 50%;
+  transform: rotate(var(--angle)) translateX(0);
+  animation: fxSpark 420ms ease-out forwards;
+}
+.fx-sunk .fx-spark { background: #ff5c5c; width: 6px; height: 6px; animation-duration: 560ms; }
+
+@keyframes fxCore {
+  0% { transform: scale(0.2); opacity: 1; }
+  55% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+@keyframes fxRing {
+  0% { transform: scale(0.3); opacity: 0.9; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+@keyframes fxSpark {
+  0% { transform: rotate(var(--angle)) translateX(0) scale(1); opacity: 1; }
+  100% { transform: rotate(var(--angle)) translateX(14px) scale(0.4); opacity: 0; }
+}
+
+/* bubbles rising once a ship is fully sunk */
+.fx-bubble {
+  position: absolute;
+  bottom: 22%;
+  left: var(--bx, 50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(190, 225, 255, 0.9);
+  animation: fxBubble 620ms ease-in forwards;
+  animation-delay: 260ms;
+  opacity: 0;
+}
+@keyframes fxBubble {
+  0% { transform: translateY(0) scale(0.6); opacity: 0.9; }
+  100% { transform: translateY(-16px) scale(1); opacity: 0; }
+}
+
+/* -- Miss: water splash -- */
+.fx-splash-ring {
+  position: absolute;
+  width: 65%;
+  height: 65%;
+  border-radius: 50%;
+  border: 2px solid #7fb8e6;
+  opacity: 0.8;
+  animation: fxSplash 480ms ease-out forwards;
+}
+.fx-splash-ring2 { animation-delay: 110ms; }
+
+@keyframes fxSplash {
+  0% { transform: scale(0.2); opacity: 0.8; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
 .battle-turn {
   text-align: center;
   font-size: 1.1rem;

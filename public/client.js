@@ -19,6 +19,45 @@ function showScreen(name) {
   screens[name].classList.remove('hidden');
 }
 
+// ---------- Ship hull rendering ----------
+// Paints a ship's cells so the group reads as one vessel (pointed bow,
+// rounded stern, a deck line, and a small bridge block on longer ships)
+// instead of a row of identical squares.
+const SHIP_SHAPE_CLASSES = [
+  'ship', 'ship-solo',
+  'ship-h-start', 'ship-h-mid', 'ship-h-end',
+  'ship-v-start', 'ship-v-mid', 'ship-v-end',
+];
+
+function clearShipShape(el) {
+  if (!el) return;
+  el.classList.remove(...SHIP_SHAPE_CLASSES);
+  const cabin = el.querySelector('.ship-cabin');
+  if (cabin) cabin.remove();
+}
+
+function paintShipHull(cells, cellElFn) {
+  const sorted = [...cells].sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+  const orientation = sorted.length === 1 ? 'solo' : (sorted[0][0] === sorted[1][0] ? 'h' : 'v');
+  sorted.forEach(([r, c], i) => {
+    const el = cellElFn(r, c);
+    if (!el) return;
+    el.classList.add('ship');
+    if (orientation === 'solo') {
+      el.classList.add('ship-solo');
+    } else {
+      const pos = i === 0 ? 'start' : (i === sorted.length - 1 ? 'end' : 'mid');
+      el.classList.add(`ship-${orientation}-${pos}`);
+    }
+    // small bridge/superstructure block on the second segment of longer ships
+    if (sorted.length >= 3 && i === 1 && !el.querySelector('.ship-cabin')) {
+      const cabin = document.createElement('span');
+      cabin.className = 'ship-cabin';
+      el.appendChild(cabin);
+    }
+  });
+}
+
 const statusBar = $('status-bar');
 function setStatus(text) { statusBar.textContent = text; }
 
@@ -249,12 +288,9 @@ function buildOwnGrid() {
 }
 
 function paintOwnShips() {
-  document.querySelectorAll('#grid-own .cell').forEach((el) => el.classList.remove('ship'));
+  document.querySelectorAll('#grid-own .cell').forEach(clearShipShape);
   for (const ship of placedShips) {
-    for (const [r, c] of ship.cells) {
-      const el = ownCellEl(r, c);
-      if (el) el.classList.add('ship');
-    }
+    paintShipHull(ship.cells, ownCellEl);
   }
 }
 
@@ -339,13 +375,10 @@ $('btn-ready').addEventListener('click', () => {
 let myTurn = false;
 let ownShotsGrid = null; // 10x10 of null|'hit'|'miss'|'sunk' — shots opponent made on us
 let enemyShotsGrid = null; // 10x10 of null|'hit'|'miss'|'sunk' — our shots on enemy
-let ownShipCellsSet = null;
 
 function buildBattleGrids() {
   ownShotsGrid = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
   enemyShotsGrid = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
-  ownShipCellsSet = new Set();
-  placedShips.forEach((s) => s.cells.forEach(([r, c]) => ownShipCellsSet.add(`${r},${c}`)));
 
   const selfGrid = $('grid-self');
   selfGrid.innerHTML = '';
@@ -354,12 +387,12 @@ function buildBattleGrids() {
     for (let c = 0; c < SIZE; c++) {
       const cell = document.createElement('div');
       cell.className = 'cell';
-      if (ownShipCellsSet.has(`${r},${c}`)) cell.classList.add('ship');
       cell.dataset.r = r;
       cell.dataset.c = c;
       selfGrid.appendChild(cell);
     }
   }
+  placedShips.forEach((s) => paintShipHull(s.cells, selfCellEl));
 
   const enemyGrid = $('grid-enemy');
   enemyGrid.innerHTML = '';
@@ -418,6 +451,7 @@ function buildBattleGridsFromSnapshot(msg) {
       markCell(enemyCellEl(r, c), 'sunk');
       enemyShotsGrid[r][c] = 'sunk';
     });
+    paintShipHull(cells, enemyCellEl);
   });
 }
 
@@ -599,12 +633,14 @@ function handleMessage(msg) {
       const gridFor = iAmShooter ? enemyShotsGrid : ownShotsGrid;
       if (result === 'sunk' || result === 'win') {
         // reveal + animate every cell of the ship that just went down
-        (shipCells && shipCells.length ? shipCells : [[r, c]]).forEach(([sr, sc]) => {
+        const cells = shipCells && shipCells.length ? shipCells : [[r, c]];
+        cells.forEach(([sr, sc]) => {
           const el = cellFor(sr, sc);
           markCell(el, 'sunk');
           gridFor[sr][sc] = 'sunk';
           spawnImpactFx(el, 'sunk');
         });
+        paintShipHull(cells, cellFor); // own ships are already painted; this reveals a sunk enemy hull
       } else {
         const cls = result === 'miss' ? 'miss' : 'hit';
         const el = cellFor(r, c);

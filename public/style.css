@@ -244,7 +244,52 @@ h1 {
   -webkit-tap-highlight-color: transparent;
 }
 
-.cell.ship { background: var(--ship); }
+/* ---------- Ship hulls ---------- */
+/* A ship's cells are painted together so the group reads as one vessel:
+   a pointed bow, a rounded stern, a deck line running the length, and a
+   small bridge block on longer ships — instead of a row of plain squares. */
+
+.cell.ship {
+  background: linear-gradient(155deg, #5d84ad 0%, #3c5f87 45%, #253f5e 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.cell.ship::before {
+  content: "";
+  position: absolute;
+  background: rgba(255, 255, 255, 0.16);
+  border-radius: 2px;
+}
+.cell.ship-h-start::before, .cell.ship-h-mid::before, .cell.ship-h-end::before {
+  left: 8%; right: 8%; top: 50%; height: 2px; transform: translateY(-50%);
+}
+.cell.ship-v-start::before, .cell.ship-v-mid::before, .cell.ship-v-end::before {
+  top: 8%; bottom: 8%; left: 50%; width: 2px; transform: translateX(-50%);
+}
+
+.ship-cabin {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 42%;
+  height: 42%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.24);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  z-index: 1;
+}
+
+/* pointed bow at the low-index end */
+.cell.ship-h-start { clip-path: polygon(0% 50%, 30% 0%, 100% 0%, 100% 100%, 30% 100%); }
+.cell.ship-v-start { clip-path: polygon(50% 0%, 100% 30%, 100% 100%, 0% 100%, 0% 30%); }
+/* rounded stern at the high-index end */
+.cell.ship-h-end { border-radius: 0 50% 50% 0 / 0 50% 50% 0; }
+.cell.ship-v-end { border-radius: 0 0 50% 50% / 0 0 50% 50%; }
+/* a lone 1-cell ship gets a small rounded hull of its own */
+.cell.ship-solo { border-radius: 46%; }
+.cell.ship-solo::before { display: none; }
+
 .cell.preview-ok { outline: 2px solid var(--ok); }
 .cell.preview-bad { outline: 2px solid var(--hit); }
 .cell.miss { background: var(--water-shot); }

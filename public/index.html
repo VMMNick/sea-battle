@@ -6,11 +6,23 @@
 <title>Морський бій онлайн</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%93%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
+<script>
+// Застосовуємо збережену тему ще до відмальовки сторінки, щоб уникнути
+// короткого "спалаху" темного фону перед переключенням на світлий.
+(function () {
+  try {
+    var raw = localStorage.getItem('seabattle_settings');
+    if (raw && JSON.parse(raw).lightTheme) {
+      document.documentElement.classList.add('light-theme');
+    }
+  } catch (e) { /* ignore (private mode etc.) */ }
+})();
+</script>
 </head>
 <body>
 
 <header>
-  <button id="btn-settings" class="btn-icon" type="button" aria-label="Налаштування звуку та вібрації" title="Налаштування">⚙️</button>
+  <button id="btn-settings" class="btn-icon" type="button" aria-label="Налаштування звуку, вібрації та теми" title="Налаштування">⚙️</button>
   <div id="settings-panel" class="settings-panel hidden">
     <label class="settings-row">
       <input type="checkbox" id="toggle-sound">
@@ -19,6 +31,10 @@
     <label class="settings-row">
       <input type="checkbox" id="toggle-vibration">
       <span>📳 Вібрація</span>
+    </label>
+    <label class="settings-row">
+      <input type="checkbox" id="toggle-theme">
+      <span>☀️ Світла тема</span>
     </label>
   </div>
   <h1>⚓ Морський бій</h1>

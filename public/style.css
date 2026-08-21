@@ -551,3 +551,99 @@ h1 {
   .panel { padding: 10px 14px; }
   .boards { gap: 10px; }
 }
+
+/* ---------- Світла тема ----------
+   Перемикається кожним користувачем самостійно (⚙️ → «Світла тема») і
+   зберігається в localStorage окремо для кожного браузера/пристрою. */
+html.light-theme {
+  --bg: #eef3f9;
+  --bg-panel: #ffffff;
+  --water: #cfe3f5;
+  --water-shot: #b9cede;
+  --miss: #7c93a8;
+  --ship: #7c9dbf;
+  --text: #1a2733;
+  --text-dim: #5c7086;
+  --ok: #1f9d5c;
+}
+
+html.light-theme body {
+  background: radial-gradient(1200px 600px at 50% -10%, #ffffff, var(--bg));
+}
+
+html.light-theme .btn-icon { border-color: #c7d4e2; }
+html.light-theme .btn-icon:hover { background: #e4ecf5; }
+
+html.light-theme .settings-panel {
+  border-color: #d7e0ea;
+  box-shadow: 0 8px 20px rgba(30, 50, 80, 0.14);
+}
+
+html.light-theme .opp-status-banner {
+  background: #fff3d6;
+  border-color: #f0cf8a;
+  color: #8a6416;
+}
+html.light-theme .opp-status-banner.ok {
+  background: #e3f8ec;
+  border-color: #9fe0bd;
+}
+
+html.light-theme .panel {
+  border-color: #d7e0ea;
+  box-shadow: 0 2px 10px rgba(30, 50, 80, 0.06);
+}
+
+html.light-theme .menu-card:hover {
+  box-shadow: 0 10px 24px rgba(30, 50, 80, 0.14);
+}
+
+html.light-theme #input-code {
+  border-color: #c7d4e2;
+  background: #f4f7fb;
+}
+
+html.light-theme .btn {
+  border-color: #c7d4e2;
+  background: #eef2f7;
+  color: var(--text);
+}
+html.light-theme .btn:hover { background: #e2e9f1; }
+
+/* Button variants each keep their own accent background — re-declared here
+   because they'd otherwise lose to the higher-specificity ".btn" rule above. */
+html.light-theme .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+html.light-theme .btn-primary:hover { background: #4aa9ff; }
+
+html.light-theme .error-text { color: #c23a3a; }
+
+html.light-theme .spinner { border-color: #d7e0ea; }
+
+html.light-theme .btn-cancel {
+  background: transparent;
+  border-color: #f0c6c6;
+  color: #c23a3a;
+}
+html.light-theme .btn-cancel:hover { background: #fbe9e9; border-color: #e8a8a8; }
+
+html.light-theme .btn-bot {
+  background: #eee7ff;
+  border-color: #cbb8ff;
+  color: #5b3fae;
+}
+html.light-theme .btn-bot:hover { background: #e2d6ff; }
+
+html.light-theme .fleet-chip {
+  background: #f4f7fb;
+  border-color: #d7e0ea;
+}
+
+html.light-theme .cell.sunk { background: #f3c9c9; }
+html.light-theme .cell.sunk::after { color: #a13030; }
+html.light-theme .cell.miss::after { color: #4d6577; }
+
+html.light-theme .grid-enemy .cell:hover { background: #a9cdea; }

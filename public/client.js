@@ -86,10 +86,12 @@ function clearSession() {
   try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
 }
 
-// ---------- Settings: sound & vibration on/off (saved across sessions) ----------
+// ---------- Settings: sound, vibration & theme (saved across sessions) ----------
+// Кожен налаштовує це для себе — значення живуть у localStorage конкретного
+// браузера/пристрою, тож у різних гравців можуть бути різні перемикачі.
 const SETTINGS_KEY = 'seabattle_settings';
 function loadSettings() {
-  const defaults = { sound: true, vibration: true };
+  const defaults = { sound: true, vibration: true, lightTheme: false };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
@@ -100,6 +102,11 @@ function saveSettings() {
 }
 const settings = loadSettings();
 
+function applyTheme() {
+  document.documentElement.classList.toggle('light-theme', !!settings.lightTheme);
+}
+applyTheme(); // синхронізує стан на випадок, якщо ранній inline-скрипт у <head> не спрацював (private mode тощо)
+
 const vibrationSupported = typeof navigator !== 'undefined' && 'vibrate' in navigator;
 
 (function initSettingsUI() {
@@ -107,9 +114,11 @@ const vibrationSupported = typeof navigator !== 'undefined' && 'vibrate' in navi
   const panel = $('settings-panel');
   const soundToggle = $('toggle-sound');
   const vibToggle = $('toggle-vibration');
+  const themeToggle = $('toggle-theme');
 
   soundToggle.checked = settings.sound;
   vibToggle.checked = settings.vibration;
+  themeToggle.checked = settings.lightTheme;
 
   if (!vibrationSupported) {
     vibToggle.checked = false;
@@ -126,6 +135,11 @@ const vibrationSupported = typeof navigator !== 'undefined' && 'vibrate' in navi
   vibToggle.addEventListener('change', () => {
     settings.vibration = vibToggle.checked;
     saveSettings();
+  });
+  themeToggle.addEventListener('change', () => {
+    settings.lightTheme = themeToggle.checked;
+    saveSettings();
+    applyTheme();
   });
 
   btn.addEventListener('click', (e) => {

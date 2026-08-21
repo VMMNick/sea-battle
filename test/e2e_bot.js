@@ -20,7 +20,11 @@ const URL = process.env.URL || 'http://localhost:8123';
   // must skip the waiting screen entirely and land straight on placement
   await page.waitForSelector('#screen-placement:not(.hidden)', { timeout: 8000 });
   const waitingHidden = await page.getAttribute('#screen-waiting', 'class');
-  console.log('OK: bot game skipped the waiting screen, went straight to placement. (#screen-waiting class:', waitingHidden, ')');
+  console.log(
+    'OK: bot game skipped the waiting screen, went straight to placement. (#screen-waiting class:',
+    waitingHidden,
+    ')',
+  );
   if (!waitingHidden.includes('hidden')) throw new Error('waiting screen should stay hidden for a bot game');
 
   await page.click('#btn-random');
@@ -30,24 +34,27 @@ const URL = process.env.URL || 'http://localhost:8123';
 
   const enemyTitle = (await page.textContent('#enemy-board-title')).trim();
   console.log('Enemy board title:', enemyTitle);
-  if (!enemyTitle.includes('бота')) throw new Error(`expected enemy board title to mention the bot, got "${enemyTitle}"`);
+  if (!enemyTitle.includes('бота'))
+    throw new Error(`expected enemy board title to mention the bot, got "${enemyTitle}"`);
 
   // Sweep the whole enemy board in order whenever it's our turn, letting the
   // bot fire automatically on its own turns, until the game concludes.
   let rounds = 0;
   let finished = false;
-  outer:
-  for (let r = 0; r < 10 && !finished; r++) {
+  outer: for (let r = 0; r < 10 && !finished; r++) {
     for (let c = 0; c < 10 && !finished; c++) {
       rounds++;
       if (rounds > 400) throw new Error('game did not conclude within round budget');
 
       // wait until it is our turn or the game is over
-      await page.waitForFunction(() => {
-        const overVisible = !document.getElementById('screen-over').classList.contains('hidden');
-        const turnEl = document.getElementById('battle-turn');
-        return overVisible || (turnEl && turnEl.classList.contains('my-turn'));
-      }, { timeout: 15000 });
+      await page.waitForFunction(
+        () => {
+          const overVisible = !document.getElementById('screen-over').classList.contains('hidden');
+          const turnEl = document.getElementById('battle-turn');
+          return overVisible || (turnEl && turnEl.classList.contains('my-turn'));
+        },
+        { timeout: 15000 },
+      );
 
       const overClass = await page.getAttribute('#screen-over', 'class');
       if (!overClass.includes('hidden')) {

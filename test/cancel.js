@@ -16,12 +16,19 @@ class Client {
       const start = Date.now();
       const iv = setInterval(() => {
         const i = this.queue.findIndex(predicate);
-        if (i !== -1) { clearInterval(iv); resolve(this.queue.splice(i, 1)[0]); }
-        else if (Date.now() - start > timeoutMs) { clearInterval(iv); reject(new Error('timeout')); }
+        if (i !== -1) {
+          clearInterval(iv);
+          resolve(this.queue.splice(i, 1)[0]);
+        } else if (Date.now() - start > timeoutMs) {
+          clearInterval(iv);
+          reject(new Error('timeout'));
+        }
       }, 30);
     });
   }
-  send(obj) { this.ws.send(JSON.stringify(obj)); }
+  send(obj) {
+    this.ws.send(JSON.stringify(obj));
+  }
 }
 
 function connect() {

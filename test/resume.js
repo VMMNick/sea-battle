@@ -17,13 +17,22 @@ class Client {
       const start = Date.now();
       const iv = setInterval(() => {
         const i = this.queue.findIndex(predicate);
-        if (i !== -1) { clearInterval(iv); resolve(this.queue.splice(i, 1)[0]); }
-        else if (Date.now() - start > timeoutMs) { clearInterval(iv); reject(new Error('timeout waiting for ' + predicate)); }
+        if (i !== -1) {
+          clearInterval(iv);
+          resolve(this.queue.splice(i, 1)[0]);
+        } else if (Date.now() - start > timeoutMs) {
+          clearInterval(iv);
+          reject(new Error('timeout waiting for ' + predicate));
+        }
       }, 30);
     });
   }
-  send(obj) { this.ws.send(JSON.stringify(obj)); }
-  close() { this.ws.close(); }
+  send(obj) {
+    this.ws.send(JSON.stringify(obj));
+  }
+  close() {
+    this.ws.close();
+  }
 }
 
 function connect() {
@@ -41,10 +50,13 @@ function randomFleet() {
   const inB = (r, c) => r >= 0 && r < SIZE && c >= 0 && c < SIZE;
   function neighbors(cells) {
     const s = new Set();
-    for (const [r, c] of cells) for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const nr = r + dr, nc = c + dc;
-      if (inB(nr, nc)) s.add(`${nr},${nc}`);
-    }
+    for (const [r, c] of cells)
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr,
+            nc = c + dc;
+          if (inB(nr, nc)) s.add(`${nr},${nc}`);
+        }
     return s;
   }
   function canPlace(cells) {
@@ -53,7 +65,8 @@ function randomFleet() {
     return true;
   }
   for (const len of SHIP_LENGTHS) {
-    let placed = false, attempts = 0;
+    let placed = false,
+      attempts = 0;
     while (!placed && attempts < 2000) {
       attempts++;
       const horiz = Math.random() < 0.5;
@@ -61,7 +74,11 @@ function randomFleet() {
       const c = Math.floor(Math.random() * SIZE);
       const cells = [];
       for (let i = 0; i < len; i++) cells.push(horiz ? [r, c + i] : [r + i, c]);
-      if (canPlace(cells)) { ships.push({ cells }); cells.forEach(([r, c]) => occupied.add(`${r},${c}`)); placed = true; }
+      if (canPlace(cells)) {
+        ships.push({ cells });
+        cells.forEach(([r, c]) => occupied.add(`${r},${c}`));
+        placed = true;
+      }
     }
     if (!placed) throw new Error('failed to place ship');
   }
@@ -146,7 +163,7 @@ function randomFleet() {
       console.log('OK: resumed snapshot correctly shows the incoming hit on my own board at', hr, hc);
     } else {
       if (resumed.myShotsOnOpp[hr][hc] !== 'hit') {
-        throw new Error('resumed snapshot missing p2\'s own shot on the opponent');
+        throw new Error("resumed snapshot missing p2's own shot on the opponent");
       }
       console.log('OK: resumed snapshot correctly shows my own shot on the opponent at', hr, hc);
     }
@@ -163,7 +180,8 @@ function randomFleet() {
     let turn = resumed.turn;
     const targets = { p1: fleet2.flatMap((s) => s.cells), p2: fleet1.flatMap((s) => s.cells) };
     const already = { p1: new Set([`${hr},${hc}`]), p2: new Set() };
-    if (shooterIsP1) already.p1.add(`${hr},${hc}`); else already.p2.add(`${hr},${hc}`);
+    if (shooterIsP1) already.p1.add(`${hr},${hc}`);
+    else already.p2.add(`${hr},${hc}`);
     const idx = { p1: 0, p2: 0 };
     const players = { p1, p2: p2b };
     let winner = null;

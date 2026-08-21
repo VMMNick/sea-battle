@@ -17,6 +17,9 @@ const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.png': 'image/png',
 };
 
 const server = http.createServer((req, res) => {
@@ -60,7 +63,7 @@ function inBounds(r, c) {
 function validateShips(ships) {
   if (!Array.isArray(ships) || ships.length !== SHIP_LENGTHS.length) return null;
 
-  const lengths = ships.map((s) => Array.isArray(s.cells) ? s.cells.length : -1).sort((a, b) => a - b);
+  const lengths = ships.map((s) => (Array.isArray(s.cells) ? s.cells.length : -1)).sort((a, b) => a - b);
   const expected = [...SHIP_LENGTHS].sort((a, b) => a - b);
   if (JSON.stringify(lengths) !== JSON.stringify(expected)) return null;
 
@@ -99,7 +102,8 @@ function validateShips(ships) {
       if (occupied.has(key)) return null; // overlap
       for (let dr = -1; dr <= 1; dr++) {
         for (let dc = -1; dc <= 1; dc++) {
-          const nr = r + dr, nc = c + dc;
+          const nr = r + dr,
+            nc = c + dc;
           if (inBounds(nr, nc) && grid[nr][nc] && grid[nr][nc] !== ship) {
             // touching a different ship
             if (!cells.some(([cr, cc]) => cr === nr && cc === nc)) return null;
@@ -127,7 +131,8 @@ function generateRandomShips() {
     for (const [r, c] of cells) {
       for (let dr = -1; dr <= 1; dr++) {
         for (let dc = -1; dc <= 1; dc++) {
-          const nr = r + dr, nc = c + dc;
+          const nr = r + dr,
+            nc = c + dc;
           if (inBounds(nr, nc)) set.add(`${nr},${nc}`);
         }
       }
@@ -190,10 +195,11 @@ function newPlayer(ws) {
   };
 }
 
-function newBotPlayer() {
+function newBotPlayer(difficulty) {
   return {
     ws: null,
     isBot: true,
+    difficulty: difficulty === 'easy' ? 'easy' : 'smart', // 'easy' fires blind; 'smart' hunts with the heatmap AI below
     token: null,
     ships: null,
     shotsReceived: emptyGrid(),
@@ -268,10 +274,16 @@ function pickBotMove(target, ai) {
       for (let c = 0; c <= SIZE - len; c++) {
         let fits = true;
         for (let i = 0; i < len; i++) {
-          if (cellBlocked(r, c + i)) { fits = false; break; }
+          if (cellBlocked(r, c + i)) {
+            fits = false;
+            break;
+          }
         }
         if (!fits) continue;
-        for (let i = 0; i < len; i++) { scores[r][c + i]++; anyScore = true; }
+        for (let i = 0; i < len; i++) {
+          scores[r][c + i]++;
+          anyScore = true;
+        }
       }
     }
     if (len > 1) {
@@ -279,10 +291,16 @@ function pickBotMove(target, ai) {
         for (let r = 0; r <= SIZE - len; r++) {
           let fits = true;
           for (let i = 0; i < len; i++) {
-            if (cellBlocked(r + i, c)) { fits = false; break; }
+            if (cellBlocked(r + i, c)) {
+              fits = false;
+              break;
+            }
           }
           if (!fits) continue;
-          for (let i = 0; i < len; i++) { scores[r + i][c]++; anyScore = true; }
+          for (let i = 0; i < len; i++) {
+            scores[r + i][c]++;
+            anyScore = true;
+          }
         }
       }
     }
@@ -294,8 +312,11 @@ function pickBotMove(target, ai) {
       for (let c = 0; c < SIZE; c++) {
         if (cellBlocked(r, c)) continue;
         const s = scores[r][c];
-        if (s > best) { best = s; bestCells.length = 0; bestCells.push([r, c]); }
-        else if (s === best) bestCells.push([r, c]);
+        if (s > best) {
+          best = s;
+          bestCells.length = 0;
+          bestCells.push([r, c]);
+        } else if (s === best) bestCells.push([r, c]);
       }
     }
   } else {
@@ -311,6 +332,20 @@ function pickBotMove(target, ai) {
   return bestCells[crypto.randomInt(bestCells.length)];
 }
 
+// 'Легкий' бот: жодного полювання чи прицілювання — просто випадкова
+// невипробувана клітинка щоразу, навіть одразу після влучання.
+function pickBotMoveEasy(target) {
+  const tried = target.shotsReceived;
+  const cells = [];
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if (!tried[r][c]) cells.push([r, c]);
+    }
+  }
+  if (!cells.length) return null;
+  return cells[crypto.randomInt(cells.length)];
+}
+
 // Marks every cell touching (including diagonally) the given ship's cells as
 // "dead" — guaranteed empty, since ships can never touch under this game's
 // placement rules. Lets the hunt phase skip them without wasting a real shot.
@@ -318,7 +353,8 @@ function markDeadAround(ai, cells) {
   for (const [r, c] of cells) {
     for (let dr = -1; dr <= 1; dr++) {
       for (let dc = -1; dc <= 1; dc++) {
-        const nr = r + dr, nc = c + dc;
+        const nr = r + dr,
+          nc = c + dc;
         if (inBounds(nr, nc)) ai.dead.add(`${nr},${nc}`);
       }
     }
@@ -349,7 +385,12 @@ function updateBotAI(ai, r, c, result) {
   if (ai.hits.length === 1) {
     ai.mode = 'target';
     ai.direction = null;
-    const candidates = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+    const candidates = [
+      [r - 1, c],
+      [r + 1, c],
+      [r, c - 1],
+      [r, c + 1],
+    ];
     for (let i = candidates.length - 1; i > 0; i--) {
       const j = crypto.randomInt(i + 1);
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
@@ -379,9 +420,8 @@ function updateBotAI(ai, r, c, result) {
 function buildResumeSnapshot(room, myKey) {
   const me = room.players[myKey];
   const opp = room.players[otherKey(myKey)];
-  const sunkEnemyShips = opp && opp.ships
-    ? opp.ships.filter((s) => s.hits.size === s.cells.length).map((s) => s.cells)
-    : [];
+  const sunkEnemyShips =
+    opp && opp.ships ? opp.ships.filter((s) => s.hits.size === s.cells.length).map((s) => s.cells) : [];
   return {
     type: 'resumed',
     code: room.code,
@@ -474,17 +514,20 @@ function scheduleBotMove(room) {
   const target = room.players[otherKey(botKey)];
   if (!target) return;
 
-  setTimeout(() => {
-    // re-check everything: the room/game may have moved on while we waited
-    if (room.phase !== 'battle' || room.turn !== botKey) return;
-    if (!rooms.get(room.code) || rooms.get(room.code) !== room) return;
-    const move = pickBotMove(target, bot.ai);
-    if (!move) return;
-    const [r, c] = move;
-    const { result } = performFire(room, botKey, r, c);
-    updateBotAI(bot.ai, r, c, result);
-    scheduleBotMove(room); // keeps firing on its own turn (hit → shoot again)
-  }, 550 + crypto.randomInt(450));
+  setTimeout(
+    () => {
+      // re-check everything: the room/game may have moved on while we waited
+      if (room.phase !== 'battle' || room.turn !== botKey) return;
+      if (!rooms.get(room.code) || rooms.get(room.code) !== room) return;
+      const move = bot.difficulty === 'easy' ? pickBotMoveEasy(target) : pickBotMove(target, bot.ai);
+      if (!move) return;
+      const [r, c] = move;
+      const { result } = performFire(room, botKey, r, c);
+      if (bot.difficulty !== 'easy') updateBotAI(bot.ai, r, c, result);
+      scheduleBotMove(room); // keeps firing on its own turn (hit → shoot again)
+    },
+    550 + crypto.randomInt(450),
+  );
 }
 
 function resetRoomForRematch(room) {
@@ -501,11 +544,36 @@ function resetRoomForRematch(room) {
   room.winner = null;
 }
 
+// ---------- Rate limiting ----------
+// Cheap per-connection sliding-window limiter. Scoped to stop a single
+// misbehaving client from flooding room creation, brute-forcing 4-char room
+// codes, or spamming shots — not a substitute for a real edge/WAF rate
+// limiter if this ever sees real public traffic at scale, since a
+// determined attacker can still open many connections. Good enough for a
+// hobby-scale deployment without adding an external dependency.
+function makeRateLimiter(maxEvents, windowMs) {
+  const timestamps = [];
+  return function allow() {
+    const now = Date.now();
+    while (timestamps.length && now - timestamps[0] > windowMs) timestamps.shift();
+    if (timestamps.length >= maxEvents) return false;
+    timestamps.push(now);
+    return true;
+  };
+}
+
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;
-  ws.on('pong', () => { ws.isAlive = true; });
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
+  // create/create_bot/join is one bucket (room churn / code-guessing); fire
+  // is separate and more generous since rapid clicking during real play is normal.
+  const roomLimiter = makeRateLimiter(10, 60000); // 10 per minute
+  const fireLimiter = makeRateLimiter(40, 10000); // 40 per 10s
 
   let roomCode = null;
   let myKey = null; // 'p1' | 'p2'
@@ -516,6 +584,13 @@ wss.on('connection', (ws) => {
       msg = JSON.parse(raw.toString());
     } catch {
       return;
+    }
+
+    if (msg.type === 'create' || msg.type === 'create_bot' || msg.type === 'join') {
+      if (!roomLimiter()) {
+        send(ws, { type: 'error', message: 'Забагато спроб поспіль. Зачекайте трохи і спробуйте ще раз.' });
+        return;
+      }
     }
 
     if (msg.type === 'create') {
@@ -534,22 +609,25 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'create_bot') {
+      const difficulty = msg.difficulty === 'easy' ? 'easy' : 'smart';
       const code = makeRoomCode();
       const room = {
         code,
-        players: { p1: newPlayer(ws), p2: newBotPlayer() },
+        players: { p1: newPlayer(ws), p2: newBotPlayer(difficulty) },
         phase: 'placement', // the "seat" is already filled, so skip the waiting room entirely
         turn: 'p1',
       };
       rooms.set(code, room);
       roomCode = code;
       myKey = 'p1';
-      send(ws, { type: 'bot_created', code, player: 'p1', token: room.players.p1.token });
+      send(ws, { type: 'bot_created', code, player: 'p1', token: room.players.p1.token, difficulty });
       return;
     }
 
     if (msg.type === 'join') {
-      const code = String(msg.code || '').toUpperCase().trim();
+      const code = String(msg.code || '')
+        .toUpperCase()
+        .trim();
       const room = rooms.get(code);
       if (!room) {
         send(ws, { type: 'error', message: 'Кімнату не знайдено. Перевірте код.' });
@@ -569,7 +647,9 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'resume') {
-      const code = String(msg.code || '').toUpperCase().trim();
+      const code = String(msg.code || '')
+        .toUpperCase()
+        .trim();
       const token = String(msg.token || '');
       const room = rooms.get(code);
       if (!room) {
@@ -645,6 +725,10 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'fire') {
+      if (!fireLimiter()) {
+        send(ws, { type: 'error', message: 'Забагато пострілів поспіль. Зачекайте секунду.' });
+        return;
+      }
       if (room.phase !== 'battle') return;
       if (room.turn !== myKey) {
         send(ws, { type: 'error', message: 'Зараз не ваш хід.' });
@@ -732,3 +816,35 @@ wss.on('close', () => clearInterval(interval));
 server.listen(PORT, () => {
   console.log(`Sea Battle server listening on port ${PORT}`);
 });
+
+// ---------- Graceful shutdown ----------
+// A deploy/restart (e.g. Render pushing a new version) sends SIGTERM. Give
+// connected players a heads-up before the socket actually drops, instead of
+// silently vanishing — the client already retries the connection on its own,
+// and the room state briefly survives a resume once the new process is up
+// (rooms live in memory only, so this is a courtesy message, not real
+// persistence across the restart itself).
+let shuttingDown = false;
+function shutdownGracefully(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Received ${signal} — notifying ${wss.clients.size} client(s) and shutting down…`);
+  wss.clients.forEach((ws) => {
+    send(ws, {
+      type: 'server_restarting',
+      message: 'Сервер оновлюється. Через хвилину спробуємо перепідключити вас автоматично.',
+    });
+  });
+  // Give the messages a brief moment to actually flush over the sockets
+  // before tearing anything down.
+  setTimeout(() => {
+    clearInterval(interval);
+    server.close(() => process.exit(0));
+    wss.clients.forEach((ws) => ws.close(1001, 'Server restarting'));
+    // Belt-and-braces: force-exit shortly after in case something (a slow
+    // client, a half-open socket) keeps the process alive past close().
+    setTimeout(() => process.exit(0), 3000).unref();
+  }, 300);
+}
+process.on('SIGTERM', () => shutdownGracefully('SIGTERM'));
+process.on('SIGINT', () => shutdownGracefully('SIGINT'));

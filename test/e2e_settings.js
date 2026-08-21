@@ -56,13 +56,17 @@ const URL = process.env.URL || 'http://localhost:8123';
   await page.waitForSelector('#screen-battle:not(.hidden)');
 
   for (let i = 0; i < 8; i++) {
-    await page.waitForFunction(() => {
-      const over = !document.getElementById('screen-over').classList.contains('hidden');
-      const t = document.getElementById('battle-turn');
-      return over || (t && t.classList.contains('my-turn'));
-    }, { timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const over = !document.getElementById('screen-over').classList.contains('hidden');
+        const t = document.getElementById('battle-turn');
+        return over || (t && t.classList.contains('my-turn'));
+      },
+      { timeout: 15000 },
+    );
     if (!(await page.getAttribute('#screen-over', 'class')).includes('hidden')) break;
-    const r = Math.floor(i / 10), c = i % 10;
+    const r = Math.floor(i / 10),
+      c = i % 10;
     const cell = page.locator(`#grid-enemy .cell[data-r="${r}"][data-c="${c}"]`);
     await cell.click();
     await page.waitForTimeout(150);

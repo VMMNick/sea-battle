@@ -1,139 +1,196 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="uk">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Морський бій онлайн</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%93%3C/text%3E%3C/svg%3E">
-<link rel="stylesheet" href="style.css">
-<script>
-// Застосовуємо збережену тему ще до відмальовки сторінки, щоб уникнути
-// короткого "спалаху" темного фону перед переключенням на світлий.
-(function () {
-  try {
-    var raw = localStorage.getItem('seabattle_settings');
-    if (raw && JSON.parse(raw).lightTheme) {
-      document.documentElement.classList.add('light-theme');
-    }
-  } catch (e) { /* ignore (private mode etc.) */ }
-})();
-</script>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Морський бій онлайн</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%93%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="apple-touch-icon" href="icon-192.png" />
+    <meta name="theme-color" content="#0b1a2b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#eef3f9" media="(prefers-color-scheme: light)" />
+    <link rel="stylesheet" href="style.css" />
+    <script>
+      // Застосовуємо тему ще до відмальовки сторінки, щоб уникнути короткого
+      // "спалаху" темного фону перед переключенням на світлий. Якщо
+      // користувач ще ніколи не чіпав перемикач теми, орієнтуємось на
+      // системну тему пристрою; щойно він хоч раз змінить будь-яке
+      // налаштування, збережений вибір завжди має пріоритет над системним.
+      (function () {
+        try {
+          var raw = localStorage.getItem('seabattle_settings');
+          var wantLight = raw
+            ? !!JSON.parse(raw).lightTheme
+            : !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches);
+          if (wantLight) {
+            document.documentElement.classList.add('light-theme');
+          }
+        } catch (e) {
+          /* ignore (private mode etc.) */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <!-- Озвучує зміну ходу, результат пострілу та кінець гри для програм читання з екрана;
+     візуально прихований, нічого не змінює на екрані. -->
+    <div id="aria-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
-<header>
-  <button id="btn-settings" class="btn-icon" type="button" aria-label="Налаштування звуку, вібрації та теми" title="Налаштування">⚙️</button>
-  <div id="settings-panel" class="settings-panel hidden">
-    <label class="settings-row">
-      <input type="checkbox" id="toggle-sound">
-      <span>🔊 Звук</span>
-    </label>
-    <label class="settings-row">
-      <input type="checkbox" id="toggle-vibration">
-      <span>📳 Вібрація</span>
-    </label>
-    <label class="settings-row">
-      <input type="checkbox" id="toggle-theme">
-      <span>☀️ Світла тема</span>
-    </label>
-  </div>
-  <h1>⚓ Морський бій</h1>
-  <div id="status-bar" class="status-bar">Підключення до сервера…</div>
-  <div id="opp-status-banner" class="opp-status-banner hidden"></div>
-</header>
-
-<main id="app">
-
-  <!-- ЕКРАН: Відновлення попередньої гри -->
-  <section id="screen-resuming" class="screen hidden">
-    <div class="panel center">
-      <h2>Відновлюємо вашу гру…</h2>
-      <p class="hint">Ви виходили з незавершеної партії — повертаємо вас туди, де зупинились.</p>
-      <div class="spinner"></div>
-    </div>
-  </section>
-
-  <!-- ЕКРАН: Головне меню -->
-  <section id="screen-menu" class="screen">
-    <div class="menu-primary-row">
-      <div class="panel menu-card">
-        <h2>🎯 Створити гру</h2>
-        <p>Отримайте код і надішліть його другу, щоб пограти онлайн.</p>
-        <button id="btn-create" class="btn btn-primary btn-wide">Створити нову гру</button>
+    <header>
+      <button id="btn-home" class="btn-icon btn-home" type="button" aria-label="На головну" title="На головну">
+        🚢
+      </button>
+      <button
+        id="btn-settings"
+        class="btn-icon"
+        type="button"
+        aria-label="Налаштування звуку, вібрації та теми"
+        title="Налаштування"
+      >
+        ⚙️
+      </button>
+      <div id="settings-panel" class="settings-panel hidden">
+        <label class="settings-row">
+          <input type="checkbox" id="toggle-sound" />
+          <span>🔊 Звук</span>
+        </label>
+        <label class="settings-row">
+          <input type="checkbox" id="toggle-vibration" />
+          <span>📳 Вібрація</span>
+        </label>
+        <label class="settings-row">
+          <input type="checkbox" id="toggle-theme" />
+          <span>☀️ Світла тема</span>
+        </label>
       </div>
-      <div class="panel menu-card">
-        <h2>🤖 Грати проти бота</h2>
-        <p>Без другого гравця — розставте кораблі й одразу починайте бій проти комп'ютера.</p>
-        <button id="btn-create-bot" class="btn btn-bot btn-wide">Грати проти бота</button>
-      </div>
-    </div>
-    <div class="panel">
-      <h2>Приєднатися до гри</h2>
-      <p>Введіть код кімнати, який вам надіслали.</p>
-      <div class="join-row">
-        <input id="input-code" maxlength="4" placeholder="КОД" autocomplete="off">
-        <button id="btn-join" class="btn btn-primary">Приєднатися</button>
-      </div>
-      <p id="menu-error" class="error-text"></p>
-    </div>
-  </section>
+      <h1>⚓ Морський бій</h1>
+      <div id="status-bar" class="status-bar">Підключення до сервера…</div>
+      <div id="opp-status-banner" class="opp-status-banner hidden"></div>
+    </header>
 
-  <!-- ЕКРАН: Очікування суперника -->
-  <section id="screen-waiting" class="screen hidden">
-    <div class="panel center">
-      <h2>Очікуємо суперника…</h2>
-      <p>Надішліть цей код другу:</p>
-      <div id="room-code" class="room-code"></div>
-      <button id="btn-copy-code" class="btn">Скопіювати код</button>
-      <div class="spinner"></div>
-      <button id="btn-cancel-waiting" class="btn btn-cancel">Скасувати</button>
-    </div>
-  </section>
+    <main id="app">
+      <!-- ЕКРАН: Відновлення попередньої гри -->
+      <section id="screen-resuming" class="screen hidden">
+        <div class="panel center">
+          <h2>Відновлюємо вашу гру…</h2>
+          <p class="hint">Ви виходили з незавершеної партії — повертаємо вас туди, де зупинились.</p>
+          <div class="spinner"></div>
+        </div>
+      </section>
 
-  <!-- ЕКРАН: Розстановка кораблів -->
-  <section id="screen-placement" class="screen hidden">
-    <div class="panel center">
-      <h2>Розставте кораблі</h2>
-      <p class="hint">Клікніть на клітинку, щоб поставити корабель. Клавіша <b>R</b> або кнопка — обертання. Кораблі не можуть торкатися одне одного.</p>
-      <div class="fleet-status" id="fleet-status"></div>
-      <div class="placement-controls">
-        <button id="btn-rotate" class="btn">⟳ Обертати (R)</button>
-        <button id="btn-random" class="btn">🎲 Випадково</button>
-        <button id="btn-clear" class="btn">✕ Очистити</button>
-      </div>
-      <div id="grid-own" class="grid"></div>
-      <button id="btn-ready" class="btn btn-primary btn-wide" disabled>Готово, чекати суперника</button>
-      <p id="opp-ready-note" class="note hidden">Суперник вже готовий і чекає на вас!</p>
-    </div>
-  </section>
+      <!-- ЕКРАН: Головне меню -->
+      <section id="screen-menu" class="screen">
+        <div id="stats-bar" class="stats-bar hidden"></div>
+        <div class="menu-primary-row">
+          <div class="panel menu-card">
+            <h2>🎯 Створити гру</h2>
+            <p>Отримайте код і надішліть його другу, щоб пограти онлайн.</p>
+            <button id="btn-create" class="btn btn-primary btn-wide">Створити нову гру</button>
+          </div>
+          <div class="panel menu-card">
+            <h2>🤖 Грати проти бота</h2>
+            <p>Без другого гравця — розставте кораблі й одразу починайте бій проти комп'ютера.</p>
+            <div class="difficulty-row" role="radiogroup" aria-label="Складність бота">
+              <button
+                type="button"
+                class="btn-diff"
+                id="btn-diff-easy"
+                data-difficulty="easy"
+                role="radio"
+                aria-checked="false"
+              >
+                🎯 Легкий
+              </button>
+              <button
+                type="button"
+                class="btn-diff active"
+                id="btn-diff-smart"
+                data-difficulty="smart"
+                role="radio"
+                aria-checked="true"
+              >
+                🧠 Розумний
+              </button>
+            </div>
+            <button id="btn-create-bot" class="btn btn-bot btn-wide">Грати проти бота</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Приєднатися до гри</h2>
+          <p>Введіть код кімнати, який вам надіслали.</p>
+          <div class="join-row">
+            <input id="input-code" maxlength="4" placeholder="КОД" autocomplete="off" />
+            <button id="btn-join" class="btn btn-primary">Приєднатися</button>
+          </div>
+          <p id="menu-error" class="error-text"></p>
+        </div>
+      </section>
 
-  <!-- ЕКРАН: Бій -->
-  <section id="screen-battle" class="screen hidden">
-    <div class="battle-turn" id="battle-turn">Хід гравця…</div>
-    <div class="boards">
-      <div class="board-wrap">
-        <h3>Ваш флот</h3>
-        <div id="grid-self" class="grid grid-small"></div>
-      </div>
-      <div class="board-wrap">
-        <h3 id="enemy-board-title">Флот суперника</h3>
-        <div id="grid-enemy" class="grid"></div>
-      </div>
-    </div>
-  </section>
+      <!-- ЕКРАН: Очікування суперника -->
+      <section id="screen-waiting" class="screen hidden">
+        <div class="panel center">
+          <h2>Очікуємо суперника…</h2>
+          <p>Надішліть цей код другу або скопіюйте посилання — за ним гра відкриється й одразу приєднає:</p>
+          <div id="room-code" class="room-code"></div>
+          <button id="btn-copy-code" class="btn">Скопіювати посилання</button>
+          <div class="spinner"></div>
+          <button id="btn-cancel-waiting" class="btn btn-cancel">Скасувати</button>
+        </div>
+      </section>
 
-  <!-- ЕКРАН: Кінець гри -->
-  <section id="screen-over" class="screen hidden">
-    <div class="panel center">
-      <h2 id="over-title">Гру завершено</h2>
-      <button id="btn-rematch" class="btn btn-primary">Реванш</button>
-      <button id="btn-menu" class="btn">У головне меню</button>
-      <p id="rematch-note" class="note hidden">Суперник хоче реванш!</p>
-    </div>
-  </section>
+      <!-- ЕКРАН: Розстановка кораблів -->
+      <section id="screen-placement" class="screen hidden">
+        <div class="panel center">
+          <h2>Розставте кораблі</h2>
+          <p class="hint">
+            Клікніть на клітинку, щоб поставити корабель. Клавіша <b>R</b> або кнопка — обертання. Кораблі не можуть
+            торкатися одне одного.
+          </p>
+          <div class="fleet-status" id="fleet-status"></div>
+          <div class="placement-controls">
+            <button id="btn-rotate" class="btn">⟳ Обертати (R)</button>
+            <button id="btn-random" class="btn">🎲 Випадково</button>
+            <button id="btn-clear" class="btn">✕ Очистити</button>
+          </div>
+          <div id="grid-own" class="grid"></div>
+          <button id="btn-ready" class="btn btn-primary btn-wide" disabled>Готово, чекати суперника</button>
+          <p id="opp-ready-note" class="note hidden">Суперник вже готовий і чекає на вас!</p>
+        </div>
+      </section>
 
-</main>
+      <!-- ЕКРАН: Бій -->
+      <section id="screen-battle" class="screen hidden">
+        <div class="battle-turn" id="battle-turn">Хід гравця…</div>
+        <div class="boards">
+          <div class="board-wrap">
+            <h3>Ваш флот</h3>
+            <div id="grid-self" class="grid grid-small"></div>
+          </div>
+          <div class="board-wrap">
+            <h3 id="enemy-board-title">Флот суперника</h3>
+            <div id="grid-enemy" class="grid"></div>
+          </div>
+        </div>
+        <div class="shot-log-wrap">
+          <h3 class="shot-log-title">Історія пострілів</h3>
+          <ul id="shot-log" class="shot-log"></ul>
+        </div>
+      </section>
 
-<script src="client.js"></script>
-</body>
+      <!-- ЕКРАН: Кінець гри -->
+      <section id="screen-over" class="screen hidden">
+        <div class="panel center">
+          <h2 id="over-title">Гру завершено</h2>
+          <button id="btn-rematch" class="btn btn-primary">Реванш</button>
+          <button id="btn-menu" class="btn">У головне меню</button>
+          <p id="rematch-note" class="note hidden">Суперник хоче реванш!</p>
+        </div>
+      </section>
+    </main>
+
+    <script src="client.js"></script>
+  </body>
 </html>

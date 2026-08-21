@@ -18,13 +18,22 @@ class Client {
       const start = Date.now();
       const iv = setInterval(() => {
         const i = this.queue.findIndex(predicate);
-        if (i !== -1) { clearInterval(iv); resolve(this.queue.splice(i, 1)[0]); }
-        else if (Date.now() - start > timeoutMs) { clearInterval(iv); reject(new Error('timeout')); }
+        if (i !== -1) {
+          clearInterval(iv);
+          resolve(this.queue.splice(i, 1)[0]);
+        } else if (Date.now() - start > timeoutMs) {
+          clearInterval(iv);
+          reject(new Error('timeout'));
+        }
       }, 30);
     });
   }
-  send(obj) { this.ws.send(JSON.stringify(obj)); }
-  close() { this.ws.close(); }
+  send(obj) {
+    this.ws.send(JSON.stringify(obj));
+  }
+  close() {
+    this.ws.close();
+  }
 }
 
 function connect() {
@@ -41,10 +50,13 @@ function randomFleet() {
   const inB = (r, c) => r >= 0 && r < SIZE && c >= 0 && c < SIZE;
   function neighbors(cells) {
     const s = new Set();
-    for (const [r, c] of cells) for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const nr = r + dr, nc = c + dc;
-      if (inB(nr, nc)) s.add(`${nr},${nc}`);
-    }
+    for (const [r, c] of cells)
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr,
+            nc = c + dc;
+          if (inB(nr, nc)) s.add(`${nr},${nc}`);
+        }
     return s;
   }
   function canPlace(cells) {
@@ -53,7 +65,8 @@ function randomFleet() {
     return true;
   }
   for (const len of SHIP_LENGTHS) {
-    let placed = false, attempts = 0;
+    let placed = false,
+      attempts = 0;
     while (!placed && attempts < 2000) {
       attempts++;
       const horiz = Math.random() < 0.5;
@@ -61,7 +74,11 @@ function randomFleet() {
       const c = Math.floor(Math.random() * SIZE);
       const cells = [];
       for (let i = 0; i < len; i++) cells.push(horiz ? [r, c + i] : [r + i, c]);
-      if (canPlace(cells)) { ships.push({ cells }); cells.forEach(([r, c]) => occupied.add(`${r},${c}`)); placed = true; }
+      if (canPlace(cells)) {
+        ships.push({ cells });
+        cells.forEach(([r, c]) => occupied.add(`${r},${c}`));
+        placed = true;
+      }
     }
     if (!placed) throw new Error('failed to place ship');
   }
@@ -157,7 +174,8 @@ function randomFleet() {
     const bs = await c1.waitFor((m) => m.type === 'battle_start');
     let t = bs.turn;
     const nextCell = makeSweeper();
-    let shots = 0, hits = 0;
+    let shots = 0,
+      hits = 0;
     let win = null;
     let guard = 0;
     while (!win && guard < 500) {
@@ -183,16 +201,21 @@ function randomFleet() {
   const N = 2;
   // Fold in the very first game's numbers too, so the sample is 1+N games
   // without paying for extra slow bot-delay wall-clock time.
-  let totalShots = botShotCount, totalHits = botHitCount;
+  let totalShots = botShotCount,
+    totalHits = botHitCount;
   for (let i = 0; i < N; i++) {
     const g = await playOneGame();
     totalShots += g.shots;
     totalHits += g.hits;
   }
   const avgRate = totalHits / totalShots;
-  console.log(`\nAverage bot hit rate over ${1 + N} full games: ${(avgRate * 100).toFixed(1)}% (${totalHits}/${totalShots} shots)`);
+  console.log(
+    `\nAverage bot hit rate over ${1 + N} full games: ${(avgRate * 100).toFixed(1)}% (${totalHits}/${totalShots} shots)`,
+  );
   if (avgRate < 0.24) {
-    throw new Error(`Bot hit rate too low (${(avgRate * 100).toFixed(1)}%) — hunt/target AI should meaningfully beat random (~20%)`);
+    throw new Error(
+      `Bot hit rate too low (${(avgRate * 100).toFixed(1)}%) — hunt/target AI should meaningfully beat random (~20%)`,
+    );
   }
   console.log('OK: bot plays meaningfully smarter than random shooting');
 

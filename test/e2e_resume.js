@@ -49,7 +49,11 @@ const URL = process.env.URL || 'http://localhost:8123';
   await page1.waitForSelector('#screen-battle:not(.hidden)', { timeout: 8000 });
   const shotClassAfterReload = await page1.getAttribute('#grid-enemy .cell[data-r="3"][data-c="3"]', 'class');
   console.log('After page1 reload, battle screen restored. Shot cell class:', shotClassAfterReload);
-  if (!shotClassAfterReload.includes('hit') && !shotClassAfterReload.includes('miss') && !shotClassAfterReload.includes('sunk')) {
+  if (
+    !shotClassAfterReload.includes('hit') &&
+    !shotClassAfterReload.includes('miss') &&
+    !shotClassAfterReload.includes('sunk')
+  ) {
     throw new Error('Shot history was not restored after reload');
   }
 

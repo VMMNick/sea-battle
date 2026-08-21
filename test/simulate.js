@@ -12,10 +12,13 @@ function randomFleet() {
   const inB = (r, c) => r >= 0 && r < SIZE && c >= 0 && c < SIZE;
   function neighbors(cells) {
     const s = new Set();
-    for (const [r, c] of cells) for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const nr = r + dr, nc = c + dc;
-      if (inB(nr, nc)) s.add(`${nr},${nc}`);
-    }
+    for (const [r, c] of cells)
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr,
+            nc = c + dc;
+          if (inB(nr, nc)) s.add(`${nr},${nc}`);
+        }
     return s;
   }
   function canPlace(cells) {
@@ -24,7 +27,8 @@ function randomFleet() {
     return true;
   }
   for (const len of SHIP_LENGTHS) {
-    let placed = false, attempts = 0;
+    let placed = false,
+      attempts = 0;
     while (!placed && attempts < 2000) {
       attempts++;
       const horiz = Math.random() < 0.5;
@@ -81,12 +85,19 @@ class Client {
       }, timeoutMs);
       this.waiters.push({
         predicate,
-        resolve: (msg) => { clearTimeout(timer); resolve(msg); },
+        resolve: (msg) => {
+          clearTimeout(timer);
+          resolve(msg);
+        },
       });
     });
   }
-  send(obj) { this.ws.send(JSON.stringify(obj)); }
-  close() { this.ws.close(); }
+  send(obj) {
+    this.ws.send(JSON.stringify(obj));
+  }
+  close() {
+    this.ws.close();
+  }
 }
 
 function connect() {
@@ -142,16 +153,30 @@ function connect() {
     await q2.waitFor((m) => m.type === 'start_placement');
     // two ships touching diagonally -> must be rejected
     const badFleet = randomFleet();
-    badFleet[0] = { cells: [[0, 0], [0, 1]] };
-    badFleet[1] = { cells: [[1, 2], [2, 2], [3, 2]] }; // touches [0,1] diagonally at (1,2)? (0,1)-(1,2) diagonal adjacency
+    badFleet[0] = {
+      cells: [
+        [0, 0],
+        [0, 1],
+      ],
+    };
+    badFleet[1] = {
+      cells: [
+        [1, 2],
+        [2, 2],
+        [3, 2],
+      ],
+    }; // touches [0,1] diagonally at (1,2)? (0,1)-(1,2) diagonal adjacency
     q1.send({ type: 'place', ships: badFleet });
     const res = await q1.waitFor((m) => m.type === 'error' || m.type === 'placement_ok');
     if (res.type === 'error') {
       console.log('OK: adjacent-ship placement correctly rejected ->', res.message);
     } else {
-      console.log('NOTE: placement accepted (ships may not have actually been adjacent in this random layout) - not a failure');
+      console.log(
+        'NOTE: placement accepted (ships may not have actually been adjacent in this random layout) - not a failure',
+      );
     }
-    q1.close(); q2.close();
+    q1.close();
+    q2.close();
   }
 
   // --- Test 3: play out a deterministic quick win using known enemy ship cells ---
@@ -161,7 +186,8 @@ function connect() {
   fleet1.forEach((s) => s.cells.forEach(([r, c]) => targets1.push([r, c])));
 
   let turn = battleStart1.turn;
-  let idxP1 = 0, idxP2 = 0;
+  let idxP1 = 0,
+    idxP2 = 0;
   let winner = null;
   let totalRounds = 0;
 
@@ -191,7 +217,9 @@ function connect() {
 
   const gameOver1 = await p1.waitFor((m) => m.type === 'game_over');
   const gameOver2 = await p2.waitFor((m) => m.type === 'game_over');
-  console.log(`GAME OVER. Winner: ${winner}, confirmed by game_over messages: p1 saw ${gameOver1.winner}, p2 saw ${gameOver2.winner}`);
+  console.log(
+    `GAME OVER. Winner: ${winner}, confirmed by game_over messages: p1 saw ${gameOver1.winner}, p2 saw ${gameOver2.winner}`,
+  );
 
   if (gameOver1.winner !== winner || gameOver2.winner !== winner) {
     throw new Error('game_over winner mismatch');

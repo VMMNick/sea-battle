@@ -71,7 +71,9 @@ async function checkNoOverflow(page, label) {
       return { right: r.right, bottom: r.bottom };
     });
     const withinBounds = box.right <= vp.width + 1;
-    console.log(`  [battle] enemy grid right edge = ${box.right.toFixed(1)} (viewport width ${vp.width}) -> ${withinBounds ? 'OK' : 'OUT OF BOUNDS'}`);
+    console.log(
+      `  [battle] enemy grid right edge = ${box.right.toFixed(1)} (viewport width ${vp.width}) -> ${withinBounds ? 'OK' : 'OUT OF BOUNDS'}`,
+    );
     anyFailure = anyFailure || !withinBounds;
 
     await ctx.close();

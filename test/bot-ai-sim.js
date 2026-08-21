@@ -7,26 +7,33 @@
 const SIZE = 10;
 const SHIP_LENGTHS = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
 
-function inBounds(r, c) { return r >= 0 && r < SIZE && c >= 0 && c < SIZE; }
+function inBounds(r, c) {
+  return r >= 0 && r < SIZE && c >= 0 && c < SIZE;
+}
 
 function generateRandomShips() {
   const occupied = new Set();
   const placed = [];
   function neighbors(cells) {
     const s = new Set();
-    for (const [r, c] of cells) for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const nr = r + dr, nc = c + dc;
-      if (inBounds(nr, nc)) s.add(`${nr},${nc}`);
-    }
+    for (const [r, c] of cells)
+      for (let dr = -1; dr <= 1; dr++)
+        for (let dc = -1; dc <= 1; dc++) {
+          const nr = r + dr,
+            nc = c + dc;
+          if (inBounds(nr, nc)) s.add(`${nr},${nc}`);
+        }
     return s;
   }
   function canPlace(cells) {
     for (const [r, c] of cells) if (!inBounds(r, c) || occupied.has(`${r},${c}`)) return false;
-    for (const key of neighbors(cells)) if (occupied.has(key) && !cells.some(([r, c]) => `${r},${c}` === key)) return false;
+    for (const key of neighbors(cells))
+      if (occupied.has(key) && !cells.some(([r, c]) => `${r},${c}` === key)) return false;
     return true;
   }
   for (const len of SHIP_LENGTHS) {
-    let ok = false, attempts = 0;
+    let ok = false,
+      attempts = 0;
     while (!ok && attempts < 2000) {
       attempts++;
       const horiz = Math.random() < 0.5;
@@ -34,7 +41,11 @@ function generateRandomShips() {
       const c = Math.floor(Math.random() * SIZE);
       const cells = [];
       for (let i = 0; i < len; i++) cells.push(horiz ? [r, c + i] : [r + i, c]);
-      if (canPlace(cells)) { placed.push({ cells, hits: new Set() }); cells.forEach(([r, c]) => occupied.add(`${r},${c}`)); ok = true; }
+      if (canPlace(cells)) {
+        placed.push({ cells, hits: new Set() });
+        cells.forEach(([r, c]) => occupied.add(`${r},${c}`));
+        ok = true;
+      }
     }
     if (!ok) return generateRandomShips();
   }
@@ -44,7 +55,10 @@ function generateRandomShips() {
 // ---- exact copy of the server's bot AI (kept in sync manually with server.js) ----
 function freshBotAI() {
   return {
-    mode: 'hunt', hits: [], queue: [], direction: null,
+    mode: 'hunt',
+    hits: [],
+    queue: [],
+    direction: null,
     remaining: [...SHIP_LENGTHS],
     dead: new Set(),
   };
@@ -63,7 +77,9 @@ function pickBotMove(triedGrid, ai) {
     if (!botBlocked(triedGrid, ai, r, c)) return [r, c];
   }
   if (ai.mode === 'target' && !ai.queue.length) {
-    ai.mode = 'hunt'; ai.hits = []; ai.direction = null;
+    ai.mode = 'hunt';
+    ai.hits = [];
+    ai.direction = null;
   }
   const lengths = ai.remaining.length ? ai.remaining : SHIP_LENGTHS;
   const scores = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
@@ -73,16 +89,29 @@ function pickBotMove(triedGrid, ai) {
     for (let r = 0; r < SIZE; r++) {
       for (let c = 0; c <= SIZE - len; c++) {
         let fits = true;
-        for (let i = 0; i < len; i++) { if (cellBlocked(r, c + i)) { fits = false; break; } }
+        for (let i = 0; i < len; i++) {
+          if (cellBlocked(r, c + i)) {
+            fits = false;
+            break;
+          }
+        }
         if (!fits) continue;
-        for (let i = 0; i < len; i++) { scores[r][c + i]++; anyScore = true; }
+        for (let i = 0; i < len; i++) {
+          scores[r][c + i]++;
+          anyScore = true;
+        }
       }
     }
     if (len > 1) {
       for (let c = 0; c < SIZE; c++) {
         for (let r = 0; r <= SIZE - len; r++) {
           let fits = true;
-          for (let i = 0; i < len; i++) { if (cellBlocked(r + i, c)) { fits = false; break; } }
+          for (let i = 0; i < len; i++) {
+            if (cellBlocked(r + i, c)) {
+              fits = false;
+              break;
+            }
+          }
           if (!fits) continue;
           for (let i = 0; i < len; i++) scores[r + i][c]++;
         }
@@ -96,8 +125,11 @@ function pickBotMove(triedGrid, ai) {
       for (let c = 0; c < SIZE; c++) {
         if (cellBlocked(r, c)) continue;
         const s = scores[r][c];
-        if (s > best) { best = s; bestCells.length = 0; bestCells.push([r, c]); }
-        else if (s === best) bestCells.push([r, c]);
+        if (s > best) {
+          best = s;
+          bestCells.length = 0;
+          bestCells.push([r, c]);
+        } else if (s === best) bestCells.push([r, c]);
       }
     }
   } else {
@@ -109,10 +141,12 @@ function pickBotMove(triedGrid, ai) {
 
 function markDeadAround(ai, cells) {
   for (const [r, c] of cells) {
-    for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-      const nr = r + dr, nc = c + dc;
-      if (inBounds(nr, nc)) ai.dead.add(`${nr},${nc}`);
-    }
+    for (let dr = -1; dr <= 1; dr++)
+      for (let dc = -1; dc <= 1; dc++) {
+        const nr = r + dr,
+          nc = c + dc;
+        if (inBounds(nr, nc)) ai.dead.add(`${nr},${nc}`);
+      }
   }
 }
 
@@ -122,14 +156,23 @@ function updateBotAI(ai, r, c, result) {
     const idx = ai.remaining.indexOf(shipCells.length);
     if (idx !== -1) ai.remaining.splice(idx, 1);
     markDeadAround(ai, shipCells);
-    ai.mode = 'hunt'; ai.hits = []; ai.queue = []; ai.direction = null;
+    ai.mode = 'hunt';
+    ai.hits = [];
+    ai.queue = [];
+    ai.direction = null;
     return;
   }
   if (result === 'miss') return;
   ai.hits.push([r, c]);
   if (ai.hits.length === 1) {
-    ai.mode = 'target'; ai.direction = null;
-    const candidates = [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]];
+    ai.mode = 'target';
+    ai.direction = null;
+    const candidates = [
+      [r - 1, c],
+      [r + 1, c],
+      [r, c - 1],
+      [r, c + 1],
+    ];
     for (let i = candidates.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
@@ -208,8 +251,10 @@ function playOutRandom() {
 }
 
 const N = 500;
-let aiTotal = 0, randTotal = 0;
-let aiMax = 0, aiMin = Infinity;
+let aiTotal = 0,
+  randTotal = 0;
+let aiMax = 0,
+  aiMin = Infinity;
 for (let i = 0; i < N; i++) {
   const a = playOutWithAI();
   aiTotal += a;
@@ -229,13 +274,19 @@ console.log(`Improvement: AI needs ${(100 * (1 - aiAvg / randAvg)).toFixed(1)}% 
 // pure random averages ~96-97 shots (near-exhaustive); a correct probability-
 // density hunt/target bot should comfortably finish in the 50-65 range on average.
 if (randAvg < 90) {
-  throw new Error(`Sanity check failed: random baseline (${randAvg.toFixed(1)}) is suspiciously low — test harness bug`);
+  throw new Error(
+    `Sanity check failed: random baseline (${randAvg.toFixed(1)}) is suspiciously low — test harness bug`,
+  );
 }
 if (aiAvg > 65) {
-  throw new Error(`Bot AI is not meaningfully better than random (avg ${aiAvg.toFixed(1)} shots vs random ${randAvg.toFixed(1)}) — algorithm likely has a bug`);
+  throw new Error(
+    `Bot AI is not meaningfully better than random (avg ${aiAvg.toFixed(1)} shots vs random ${randAvg.toFixed(1)}) — algorithm likely has a bug`,
+  );
 }
 if (aiAvg >= randAvg) {
-  throw new Error(`Bot AI (${aiAvg.toFixed(1)}) is not even better than random (${randAvg.toFixed(1)}) — algorithm is broken`);
+  throw new Error(
+    `Bot AI (${aiAvg.toFixed(1)}) is not even better than random (${randAvg.toFixed(1)}) — algorithm is broken`,
+  );
 }
 
 console.log('\nOK: hunt/target AI clearly outperforms random shooting ✅');

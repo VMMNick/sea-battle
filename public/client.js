@@ -24,9 +24,14 @@ function showScreen(name) {
 // rounded stern, a deck line, and a small bridge block on longer ships)
 // instead of a row of identical squares.
 const SHIP_SHAPE_CLASSES = [
-  'ship', 'ship-solo',
-  'ship-h-start', 'ship-h-mid', 'ship-h-end',
-  'ship-v-start', 'ship-v-mid', 'ship-v-end',
+  'ship',
+  'ship-solo',
+  'ship-h-start',
+  'ship-h-mid',
+  'ship-h-end',
+  'ship-v-start',
+  'ship-v-mid',
+  'ship-v-end',
 ];
 
 function clearShipShape(el) {
@@ -37,8 +42,8 @@ function clearShipShape(el) {
 }
 
 function paintShipHull(cells, cellElFn) {
-  const sorted = [...cells].sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
-  const orientation = sorted.length === 1 ? 'solo' : (sorted[0][0] === sorted[1][0] ? 'h' : 'v');
+  const sorted = [...cells].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const orientation = sorted.length === 1 ? 'solo' : sorted[0][0] === sorted[1][0] ? 'h' : 'v';
   sorted.forEach(([r, c], i) => {
     const el = cellElFn(r, c);
     if (!el) return;
@@ -46,7 +51,7 @@ function paintShipHull(cells, cellElFn) {
     if (orientation === 'solo') {
       el.classList.add('ship-solo');
     } else {
-      const pos = i === 0 ? 'start' : (i === sorted.length - 1 ? 'end' : 'mid');
+      const pos = i === 0 ? 'start' : i === sorted.length - 1 ? 'end' : 'mid';
       el.classList.add(`ship-${orientation}-${pos}`);
     }
     // small bridge/superstructure block on the second segment of longer ships
@@ -59,7 +64,21 @@ function paintShipHull(cells, cellElFn) {
 }
 
 const statusBar = $('status-bar');
-function setStatus(text) { statusBar.textContent = text; }
+function setStatus(text) {
+  statusBar.textContent = text;
+}
+
+// ---------- Screen-reader announcements (turn changes, shot results, game over) ----------
+function announce(text) {
+  const el = $('aria-announcer');
+  if (!el) return;
+  el.textContent = '';
+  // clearing first (then setting on the next frame) makes the live region
+  // announce even when the new text is identical to what was just read out
+  requestAnimationFrame(() => {
+    el.textContent = text;
+  });
+}
 
 const oppBanner = $('opp-status-banner');
 function showOppBanner(text, ok) {
@@ -74,16 +93,26 @@ function hideOppBanner() {
 // ---------- Saved session (survives accidental tab close / refresh / dropped wifi) ----------
 const SESSION_KEY = 'seabattle_session';
 function saveSession(data) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* ignore (private mode etc.) */ }
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore (private mode etc.) */
+  }
 }
 function loadSession() {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 function clearSession() {
-  try { localStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---------- Settings: sound, vibration & theme (saved across sessions) ----------
@@ -91,14 +120,26 @@ function clearSession() {
 // браузера/пристрою, тож у різних гравців можуть бути різні перемикачі.
 const SETTINGS_KEY = 'seabattle_settings';
 function loadSettings() {
-  const defaults = { sound: true, vibration: true, lightTheme: false };
+  // Until the player has ever touched a toggle, follow the system's
+  // light/dark preference; the moment any setting is saved, that saved
+  // value always wins over the system preference from then on (see the
+  // matching detection in the inline <head> script that avoids a flash).
+  const systemPrefersLight =
+    typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: light)').matches;
+  const defaults = { sound: true, vibration: true, lightTheme: systemPrefersLight };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     return raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
-  } catch { return defaults; }
+  } catch {
+    return defaults;
+  }
 }
 function saveSettings() {
-  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* ignore */ }
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    /* ignore */
+  }
 }
 const settings = loadSettings();
 
@@ -153,6 +194,51 @@ const vibrationSupported = typeof navigator !== 'undefined' && 'vibrate' in navi
   });
 })();
 
+// ---------- Local win/loss stats (per-browser, no server involved) ----------
+const STATS_KEY = 'seabattle_stats';
+function loadStats() {
+  const defaults = { vsBot: { wins: 0, losses: 0 }, vsHuman: { wins: 0, losses: 0 } };
+  try {
+    const raw = localStorage.getItem(STATS_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    return {
+      vsBot: { ...defaults.vsBot, ...parsed.vsBot },
+      vsHuman: { ...defaults.vsHuman, ...parsed.vsHuman },
+    };
+  } catch {
+    return defaults;
+  }
+}
+function saveStats() {
+  try {
+    localStorage.setItem(STATS_KEY, JSON.stringify(stats));
+  } catch {
+    /* ignore */
+  }
+}
+const stats = loadStats();
+
+function recordResult(won) {
+  const bucket = vsBot ? stats.vsBot : stats.vsHuman;
+  if (won) bucket.wins++;
+  else bucket.losses++;
+  saveStats();
+  renderStats();
+}
+
+function renderStats() {
+  const el = $('stats-bar');
+  if (!el) return;
+  const { vsBot: b, vsHuman: h } = stats;
+  const parts = [];
+  if (b.wins || b.losses) parts.push(`🤖 проти бота — ${b.wins} перемог, ${b.losses} поразок`);
+  if (h.wins || h.losses) parts.push(`👤 проти людей — ${h.wins} перемог, ${h.losses} поразок`);
+  el.textContent = parts.join('   ·   ');
+  el.classList.toggle('hidden', parts.length === 0);
+}
+renderStats();
+
 // ---------- Sound effects (synthesized — no audio files to load/host) ----------
 let audioCtx = null;
 function ensureAudioCtx() {
@@ -203,47 +289,62 @@ function playNoiseBurst({ duration = 0.3, volume = 0.3, filterFreq = 1000, filte
 
 function playSound(fn) {
   if (!settings.sound) return;
-  try { fn(); } catch { /* audio can fail silently (autoplay policy etc.) — never break gameplay */ }
+  try {
+    fn();
+  } catch {
+    /* audio can fail silently (autoplay policy etc.) — never break gameplay */
+  }
 }
 
 const sfx = {
-  fire: () => playSound(() => {
-    playTone({ freqStart: 950, freqEnd: 180, duration: 0.14, type: 'sawtooth', volume: 0.18 });
-    playNoiseBurst({ duration: 0.08, volume: 0.12, filterFreq: 2500, filterType: 'highpass' });
-  }),
-  miss: () => playSound(() => {
-    playNoiseBurst({ duration: 0.22, volume: 0.16, filterFreq: 1400, filterType: 'bandpass' });
-    playTone({ freqStart: 500, freqEnd: 140, duration: 0.15, type: 'sine', volume: 0.1 });
-  }),
-  hit: () => playSound(() => {
-    playNoiseBurst({ duration: 0.32, volume: 0.32, filterFreq: 700, filterType: 'lowpass' });
-    playTone({ freqStart: 160, freqEnd: 35, duration: 0.28, type: 'sine', volume: 0.28 });
-  }),
-  hitOnMe: () => playSound(() => {
-    playNoiseBurst({ duration: 0.3, volume: 0.3, filterFreq: 550, filterType: 'lowpass' });
-    playTone({ freqStart: 130, freqEnd: 30, duration: 0.3, type: 'sine', volume: 0.3 });
-  }),
-  sunk: () => playSound(() => {
-    playNoiseBurst({ duration: 0.4, volume: 0.36, filterFreq: 500, filterType: 'lowpass' });
-    playTone({ freqStart: 180, freqEnd: 30, duration: 0.35, type: 'sine', volume: 0.32 });
-    playNoiseBurst({ duration: 0.35, volume: 0.28, filterFreq: 350, filterType: 'lowpass', delay: 0.12 });
-    playTone({ freqStart: 300, freqEnd: 50, duration: 0.5, type: 'triangle', volume: 0.16, delay: 0.15 });
-  }),
-  win: () => playSound(() => {
-    [523, 659, 784, 1047].forEach((f, i) => {
-      playTone({ freqStart: f, duration: 0.22, type: 'triangle', volume: 0.22, delay: i * 0.11 });
-    });
-  }),
-  lose: () => playSound(() => {
-    [392, 349, 294, 220].forEach((f, i) => {
-      playTone({ freqStart: f, freqEnd: f * 0.9, duration: 0.32, type: 'sawtooth', volume: 0.18, delay: i * 0.16 });
-    });
-  }),
+  fire: () =>
+    playSound(() => {
+      playTone({ freqStart: 950, freqEnd: 180, duration: 0.14, type: 'sawtooth', volume: 0.18 });
+      playNoiseBurst({ duration: 0.08, volume: 0.12, filterFreq: 2500, filterType: 'highpass' });
+    }),
+  miss: () =>
+    playSound(() => {
+      playNoiseBurst({ duration: 0.22, volume: 0.16, filterFreq: 1400, filterType: 'bandpass' });
+      playTone({ freqStart: 500, freqEnd: 140, duration: 0.15, type: 'sine', volume: 0.1 });
+    }),
+  hit: () =>
+    playSound(() => {
+      playNoiseBurst({ duration: 0.32, volume: 0.32, filterFreq: 700, filterType: 'lowpass' });
+      playTone({ freqStart: 160, freqEnd: 35, duration: 0.28, type: 'sine', volume: 0.28 });
+    }),
+  hitOnMe: () =>
+    playSound(() => {
+      playNoiseBurst({ duration: 0.3, volume: 0.3, filterFreq: 550, filterType: 'lowpass' });
+      playTone({ freqStart: 130, freqEnd: 30, duration: 0.3, type: 'sine', volume: 0.3 });
+    }),
+  sunk: () =>
+    playSound(() => {
+      playNoiseBurst({ duration: 0.4, volume: 0.36, filterFreq: 500, filterType: 'lowpass' });
+      playTone({ freqStart: 180, freqEnd: 30, duration: 0.35, type: 'sine', volume: 0.32 });
+      playNoiseBurst({ duration: 0.35, volume: 0.28, filterFreq: 350, filterType: 'lowpass', delay: 0.12 });
+      playTone({ freqStart: 300, freqEnd: 50, duration: 0.5, type: 'triangle', volume: 0.16, delay: 0.15 });
+    }),
+  win: () =>
+    playSound(() => {
+      [523, 659, 784, 1047].forEach((f, i) => {
+        playTone({ freqStart: f, duration: 0.22, type: 'triangle', volume: 0.22, delay: i * 0.11 });
+      });
+    }),
+  lose: () =>
+    playSound(() => {
+      [392, 349, 294, 220].forEach((f, i) => {
+        playTone({ freqStart: f, freqEnd: f * 0.9, duration: 0.32, type: 'sawtooth', volume: 0.18, delay: i * 0.16 });
+      });
+    }),
 };
 
 function vibrate(pattern) {
   if (!settings.vibration || !vibrationSupported) return;
-  try { navigator.vibrate(pattern); } catch { /* ignore */ }
+  try {
+    navigator.vibrate(pattern);
+  } catch {
+    /* ignore */
+  }
 }
 
 // ---------- WebSocket ----------
@@ -258,6 +359,17 @@ function setEnemyBoardTitle() {
   $('enemy-board-title').textContent = vsBot ? 'Флот бота 🤖' : 'Флот суперника';
 }
 
+// ---------- Invite links (?code=XXXX) ----------
+// A shared room link pre-fills the join field and auto-joins on first
+// connect, so the other player only has to open the link — no typing.
+// Cleared from the address bar immediately so a later refresh (or a
+// reconnect after a dropped connection) doesn't retry a stale/used code.
+let inviteCode = (new URLSearchParams(location.search).get('code') || '').toUpperCase().trim();
+if (inviteCode) {
+  $('input-code').value = inviteCode;
+  history.replaceState(null, '', location.pathname);
+}
+
 function connect() {
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.addEventListener('open', () => {
@@ -266,6 +378,9 @@ function connect() {
     if (saved && saved.code && saved.token) {
       showScreen('resuming');
       sendMsg({ type: 'resume', code: saved.code, token: saved.token });
+    } else if (inviteCode) {
+      sendMsg({ type: 'join', code: inviteCode });
+      inviteCode = null; // only auto-join once; further reconnects won't retry automatically
     }
   });
   ws.addEventListener('close', () => {
@@ -295,9 +410,24 @@ $('btn-create').addEventListener('click', () => {
   $('menu-error').textContent = '';
   sendMsg({ type: 'create' });
 });
+
+// ---------- Bot difficulty picker ----------
+let botDifficulty = 'smart';
+const DIFFICULTY_LABEL = { easy: 'легкий', smart: 'розумний' };
+document.querySelectorAll('.btn-diff').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    botDifficulty = btn.dataset.difficulty;
+    document.querySelectorAll('.btn-diff').forEach((b) => {
+      const active = b === btn;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-checked', String(active));
+    });
+  });
+});
+
 $('btn-create-bot').addEventListener('click', () => {
   $('menu-error').textContent = '';
-  sendMsg({ type: 'create_bot' });
+  sendMsg({ type: 'create_bot', difficulty: botDifficulty });
 });
 $('btn-join').addEventListener('click', joinRoom);
 $('input-code').addEventListener('keydown', (e) => {
@@ -311,9 +441,12 @@ function joinRoom() {
 }
 
 $('btn-copy-code').addEventListener('click', () => {
-  navigator.clipboard?.writeText(roomCode).catch(() => {});
-  $('btn-copy-code').textContent = 'Скопійовано!';
-  setTimeout(() => { $('btn-copy-code').textContent = 'Скопіювати код'; }, 1500);
+  const link = `${location.origin}${location.pathname}?code=${roomCode}`;
+  navigator.clipboard?.writeText(link).catch(() => {});
+  $('btn-copy-code').textContent = 'Посилання скопійовано!';
+  setTimeout(() => {
+    $('btn-copy-code').textContent = 'Скопіювати посилання';
+  }, 1800);
 });
 
 function backToMenu() {
@@ -328,6 +461,22 @@ function backToMenu() {
   showScreen('menu');
   setStatus('Підключено до сервера');
 }
+
+// ---------- Кнопка "на головну" (доступна з будь-якого екрана) ----------
+function isMidGameScreen() {
+  return (
+    !screens.waiting.classList.contains('hidden') ||
+    !screens.placement.classList.contains('hidden') ||
+    !screens.battle.classList.contains('hidden')
+  );
+}
+$('btn-home').addEventListener('click', () => {
+  const alreadyHome = !screens.menu.classList.contains('hidden') || !screens.resuming.classList.contains('hidden');
+  if (alreadyHome) return;
+  if (isMidGameScreen() && !confirm('Покинути поточну гру та повернутися на головну?')) return;
+  sendMsg({ type: 'leave' });
+  backToMenu();
+});
 
 $('btn-cancel-waiting').addEventListener('click', () => {
   sendMsg({ type: 'leave' });
@@ -366,22 +515,28 @@ function restorePlacementReady(shipsCells) {
 
 function renderFleetStatus() {
   const counts = {};
-  SHIP_LENGTHS.forEach((l) => { counts[l] = (counts[l] || 0) + 1; });
+  SHIP_LENGTHS.forEach((l) => {
+    counts[l] = (counts[l] || 0) + 1;
+  });
   const placedCounts = {};
-  placedShips.forEach((s) => { placedCounts[s.cells.length] = (placedCounts[s.cells.length] || 0) + 1; });
+  placedShips.forEach((s) => {
+    placedCounts[s.cells.length] = (placedCounts[s.cells.length] || 0) + 1;
+  });
 
   const el = $('fleet-status');
   el.innerHTML = '';
-  Object.keys(counts).sort((a, b) => b - a).forEach((len) => {
-    const total = counts[len];
-    const placed = placedCounts[len] || 0;
-    for (let i = 0; i < total; i++) {
-      const chip = document.createElement('span');
-      chip.className = 'fleet-chip' + (i < placed ? ' done' : '');
-      chip.textContent = '▮'.repeat(Number(len));
-      el.appendChild(chip);
-    }
-  });
+  Object.keys(counts)
+    .sort((a, b) => b - a)
+    .forEach((len) => {
+      const total = counts[len];
+      const placed = placedCounts[len] || 0;
+      for (let i = 0; i < total; i++) {
+        const chip = document.createElement('span');
+        chip.className = 'fleet-chip' + (i < placed ? ' done' : '');
+        chip.textContent = '▮'.repeat(Number(len));
+        el.appendChild(chip);
+      }
+    });
 }
 
 function neighborsOf(cells) {
@@ -389,7 +544,8 @@ function neighborsOf(cells) {
   for (const [r, c] of cells) {
     for (let dr = -1; dr <= 1; dr++) {
       for (let dc = -1; dc <= 1; dc++) {
-        const nr = r + dr, nc = c + dc;
+        const nr = r + dr,
+          nc = c + dc;
         if (nr >= 0 && nr < SIZE && nc >= 0 && nc < SIZE) set.add(`${nr},${nc}`);
       }
     }
@@ -402,11 +558,9 @@ function canPlace(cells) {
     if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) return false;
     if (occupiedSet.has(`${r},${c}`)) return false;
   }
-  // no touching existing ships
+  // no touching existing ships (own cells are excluded below since they're
+  // never in occupiedSet yet at this point)
   const forbidden = neighborsOf(cells);
-  for (const [r, c] of cells) {
-    // remove own cells from forbidden check target - irrelevant since occupiedSet already excludes them
-  }
   for (const key of forbidden) {
     if (occupiedSet.has(key) && !cells.some(([r, c]) => `${r},${c}` === key)) {
       // touching an occupied cell that's not part of this ship
@@ -428,10 +582,53 @@ function cellsForPlacement(r, c, len, rot) {
   return cells;
 }
 
+// ---------- Keyboard navigation for the grids ----------
+// Both interactive grids (own board while placing, enemy board while firing)
+// work as a single roving-tabindex widget: Tab reaches the grid once, then
+// arrow keys move focus cell-to-cell and Enter/Space activates the focused
+// cell — same action as a click. `grid-self` (read-only fleet display during
+// battle) intentionally stays out of the tab order.
+function makeCellFocusable(cell, r, c, tabbable) {
+  cell.setAttribute('role', 'button');
+  cell.tabIndex = tabbable ? 0 : -1;
+  cell.setAttribute('aria-label', `Клітинка ${cellLabel(r, c)}`);
+}
+function attachGridKeyboardNav(gridEl, onActivate) {
+  if (gridEl.dataset.kbdBound) return; // container persists across rebuilds — bind once
+  gridEl.dataset.kbdBound = '1';
+  gridEl.addEventListener('keydown', (e) => {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+    const r = Number(cell.dataset.r),
+      c = Number(cell.dataset.c);
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      e.preventDefault();
+      onActivate(cell, r, c);
+      return;
+    }
+    let nr = r,
+      nc = c;
+    if (e.key === 'ArrowUp') nr = Math.max(0, r - 1);
+    else if (e.key === 'ArrowDown') nr = Math.min(SIZE - 1, r + 1);
+    else if (e.key === 'ArrowLeft') nc = Math.max(0, c - 1);
+    else if (e.key === 'ArrowRight') nc = Math.min(SIZE - 1, c + 1);
+    else return;
+    e.preventDefault();
+    const next = gridEl.querySelector(`.cell[data-r="${nr}"][data-c="${nc}"]`);
+    if (next && next !== cell) {
+      cell.tabIndex = -1;
+      next.tabIndex = 0;
+      next.focus();
+    }
+  });
+}
+
 function buildOwnGrid() {
   const grid = $('grid-own');
   grid.innerHTML = '';
   grid.classList.remove('grid-small');
+  grid.setAttribute('role', 'group');
+  grid.setAttribute('aria-label', 'Ваше поле для розстановки кораблів');
   for (let r = 0; r < SIZE; r++) {
     for (let c = 0; c < SIZE; c++) {
       const cell = document.createElement('div');
@@ -440,10 +637,14 @@ function buildOwnGrid() {
       cell.dataset.c = c;
       cell.addEventListener('mouseenter', () => previewAt(r, c));
       cell.addEventListener('mouseleave', clearPreview);
+      cell.addEventListener('focus', () => previewAt(r, c));
+      cell.addEventListener('blur', clearPreview);
       cell.addEventListener('click', () => placeAt(r, c));
+      makeCellFocusable(cell, r, c, r === 0 && c === 0);
       grid.appendChild(cell);
     }
   }
+  attachGridKeyboardNav(grid, (cell, r, c) => placeAt(r, c));
   paintOwnShips();
 }
 
@@ -459,7 +660,8 @@ function ownCellEl(r, c) {
 }
 
 function clearPreview() {
-  document.querySelectorAll('#grid-own .cell.preview-ok, #grid-own .cell.preview-bad')
+  document
+    .querySelectorAll('#grid-own .cell.preview-ok, #grid-own .cell.preview-bad')
     .forEach((el) => el.classList.remove('preview-ok', 'preview-bad'));
 }
 
@@ -536,9 +738,34 @@ let myTurn = false;
 let ownShotsGrid = null; // 10x10 of null|'hit'|'miss'|'sunk' — shots opponent made on us
 let enemyShotsGrid = null; // 10x10 of null|'hit'|'miss'|'sunk' — our shots on enemy
 
+// ---------- Shot log (running list of "Б4 — влучання" for both sides) ----------
+function cellLabel(r, c) {
+  return `${COLS[c]}${r + 1}`;
+}
+const MAX_LOG_ENTRIES = 50;
+function resetShotLog() {
+  const el = $('shot-log');
+  if (el) el.innerHTML = '';
+}
+function logShot(iAmShooter, r, c, result) {
+  const el = $('shot-log');
+  if (!el) return;
+  const who = iAmShooter ? 'Ви' : vsBot ? 'Бот' : 'Суперник';
+  const sunk = result === 'sunk' || result === 'win';
+  const cls = result === 'miss' ? 'miss' : sunk ? 'sunk' : 'hit';
+  const label = result === 'miss' ? 'промах' : sunk ? 'потоплено!' : 'влучання';
+  const li = document.createElement('li');
+  li.className = `shot-log-entry shot-log-${cls}`;
+  li.textContent = `${who}: ${cellLabel(r, c)} — ${label}`;
+  el.insertBefore(li, el.firstChild);
+  while (el.children.length > MAX_LOG_ENTRIES) el.removeChild(el.lastChild);
+  announce(li.textContent);
+}
+
 function buildBattleGrids() {
   ownShotsGrid = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
   enemyShotsGrid = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
+  resetShotLog();
 
   const selfGrid = $('grid-self');
   selfGrid.innerHTML = '';
@@ -557,6 +784,8 @@ function buildBattleGrids() {
   const enemyGrid = $('grid-enemy');
   enemyGrid.innerHTML = '';
   enemyGrid.classList.add('grid-enemy');
+  enemyGrid.setAttribute('role', 'group');
+  enemyGrid.setAttribute('aria-label', 'Поле суперника — обирайте клітинку для пострілу');
   for (let r = 0; r < SIZE; r++) {
     for (let c = 0; c < SIZE; c++) {
       const cell = document.createElement('div');
@@ -564,9 +793,11 @@ function buildBattleGrids() {
       cell.dataset.r = r;
       cell.dataset.c = c;
       cell.addEventListener('click', () => fireAt(r, c));
+      makeCellFocusable(cell, r, c, r === 0 && c === 0);
       enemyGrid.appendChild(cell);
     }
   }
+  attachGridKeyboardNav(enemyGrid, (cell, r, c) => fireAt(r, c));
   updateTurnUI();
 }
 
@@ -626,9 +857,12 @@ function updateTurnUI() {
   const el = $('battle-turn');
   el.textContent = myTurn ? 'Ваш хід — стріляйте по флоту суперника' : 'Хід суперника — очікуйте';
   el.className = 'battle-turn ' + (myTurn ? 'my-turn' : 'opp-turn');
-  $('grid-enemy').querySelectorAll('.cell').forEach((el) => {
-    el.classList.toggle('disabled', !myTurn);
-  });
+  $('grid-enemy')
+    .querySelectorAll('.cell')
+    .forEach((el) => {
+      el.classList.toggle('disabled', !myTurn);
+    });
+  announce(el.textContent);
 }
 
 function fireAt(r, c) {
@@ -643,6 +877,10 @@ function markCell(el, cls) {
   if (!el) return;
   el.classList.remove('miss', 'hit', 'sunk');
   el.classList.add(cls);
+  if (el.hasAttribute('role')) {
+    const stateLabel = cls === 'miss' ? 'промах' : cls === 'sunk' ? 'потоплено' : 'влучання';
+    el.setAttribute('aria-label', `Клітинка ${cellLabel(Number(el.dataset.r), Number(el.dataset.c))} — ${stateLabel}`);
+  }
 }
 
 // Plays a one-shot explosion/splash/sinking animation over a cell. Purely
@@ -712,11 +950,23 @@ function handleMessage(msg) {
       setEnemyBoardTitle();
       resetPlacement();
       showScreen('placement');
-      setStatus('Гра проти бота. Розставте кораблі та натисніть «Готово».');
+      setStatus(
+        `Гра проти бота (${DIFFICULTY_LABEL[msg.difficulty] || 'розумний'} рівень). Розставте кораблі та натисніть «Готово».`,
+      );
       break;
 
     case 'error':
       $('menu-error').textContent = msg.message;
+      break;
+
+    case 'server_restarting':
+      // The server is about to close every connection for a deploy/restart.
+      // The regular reconnect loop (see connect()) will keep retrying and
+      // pick the session back up automatically once it's back — this is
+      // just an early, friendlier heads-up before that "З'єднання втрачено"
+      // message would otherwise appear.
+      setStatus(msg.message || 'Сервер оновлюється. Перепідключення…');
+      announce(msg.message || 'Сервер оновлюється, зачекайте на перепідключення.');
       break;
 
     case 'resumed': {
@@ -793,6 +1043,7 @@ function handleMessage(msg) {
       const iAmShooter = by === myPlayer;
       const cellFor = iAmShooter ? enemyCellEl : selfCellEl;
       const gridFor = iAmShooter ? enemyShotsGrid : ownShotsGrid;
+      logShot(iAmShooter, r, c, result);
       if (result === 'sunk' || result === 'win') {
         // reveal + animate every cell of the ship that just went down
         const cells = shipCells && shipCells.length ? shipCells : [[r, c]];
@@ -828,10 +1079,14 @@ function handleMessage(msg) {
 
     case 'game_over': {
       const iWon = msg.winner === myPlayer;
-      $('over-title').textContent = iWon ? '🎉 Перемога! Ви розгромили флот суперника.' : '💥 Поразка. Ваш флот знищено.';
+      $('over-title').textContent = iWon
+        ? '🎉 Перемога! Ви розгромили флот суперника.'
+        : '💥 Поразка. Ваш флот знищено.';
       $('rematch-note').classList.add('hidden');
       showScreen('over');
       setStatus('Гру завершено.');
+      announce($('over-title').textContent);
+      recordResult(iWon);
       if (iWon) {
         sfx.win();
         vibrate([100, 50, 100, 50, 200]);

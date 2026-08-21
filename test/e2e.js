@@ -10,8 +10,12 @@ const URL = process.env.URL || 'http://localhost:8123';
   const page1 = await ctx1.newPage();
   const page2 = await ctx2.newPage();
 
-  page1.on('console', (m) => { if (m.type() === 'error') console.log('P1 console error:', m.text()); });
-  page2.on('console', (m) => { if (m.type() === 'error') console.log('P2 console error:', m.text()); });
+  page1.on('console', (m) => {
+    if (m.type() === 'error') console.log('P1 console error:', m.text());
+  });
+  page2.on('console', (m) => {
+    if (m.type() === 'error') console.log('P2 console error:', m.text());
+  });
   page1.on('pageerror', (e) => console.log('P1 pageerror:', e.message));
   page2.on('pageerror', (e) => console.log('P2 pageerror:', e.message));
 

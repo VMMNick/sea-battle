@@ -25,10 +25,9 @@ const URL = process.env.URL || 'http://localhost:8123';
   await page2.goto(URL);
   await page2.fill('#input-code', code);
   await page2.click('#btn-join');
-  await page2.waitForFunction(
-    () => document.getElementById('menu-error').textContent.trim().length > 0,
-    { timeout: 5000 }
-  );
+  await page2.waitForFunction(() => document.getElementById('menu-error').textContent.trim().length > 0, {
+    timeout: 5000,
+  });
   const errText = (await page2.textContent('#menu-error')).trim();
   console.log('OK: join with cancelled code shows error ->', errText);
 

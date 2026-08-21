@@ -1,0 +1,18 @@
+{
+  "name": "Морський бій онлайн",
+  "short_name": "Морський бій",
+  "description": "Онлайн гра «Морський бій» для двох гравців у реальному часі — можна встановити як застосунок.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#0b1a2b",
+  "theme_color": "#0b1a2b",
+  "lang": "uk",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

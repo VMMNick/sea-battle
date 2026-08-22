@@ -9,6 +9,10 @@ const URL = process.env.URL || 'http://localhost:8123';
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
   const ctx = await browser.newContext();
+  // This test isn't exercising the onboarding tutorial — pre-seed the "seen"
+  // flag so the modal doesn't pop up and intercept clicks (see
+  // test/e2e_onboarding.js for the dedicated onboarding test).
+  await ctx.addInitScript(() => localStorage.setItem('seabattle_onboarding_seen', '1'));
   const page = await ctx.newPage();
   page.on('dialog', (d) => d.dismiss().catch(() => {}));
   page.on('pageerror', (e) => console.log('pageerror:', e.message));
@@ -36,6 +40,10 @@ const URL = process.env.URL || 'http://localhost:8123';
   console.log('Enemy board title:', enemyTitle);
   if (!enemyTitle.includes('бота'))
     throw new Error(`expected enemy board title to mention the bot, got "${enemyTitle}"`);
+
+  const chatWrapClass = await page.getAttribute('#chat-wrap', 'class');
+  console.log('Chat widget class in a bot game:', chatWrapClass);
+  if (!chatWrapClass.includes('hidden')) throw new Error('chat widget should be hidden for a bot game');
 
   // Sweep the whole enemy board in order whenever it's our turn, letting the
   // bot fire automatically on its own turns, until the game concludes.

@@ -4,7 +4,15 @@ const URL = process.env.URL || 'http://localhost:8123';
 
 (async () => {
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
-  const page = await browser.newContext().then((c) => c.newPage());
+  // This test isn't exercising the onboarding tutorial — pre-seed the "seen"
+  // flag on every context so the modal doesn't pop up and intercept clicks
+  // (see test/e2e_onboarding.js for the dedicated onboarding test).
+  const newPage = async () => {
+    const ctx = await browser.newContext();
+    await ctx.addInitScript(() => localStorage.setItem('seabattle_onboarding_seen', '1'));
+    return ctx.newPage();
+  };
+  const page = await newPage();
   page.on('pageerror', (e) => console.log('pageerror:', e.message));
 
   await page.goto(URL);
@@ -21,7 +29,7 @@ const URL = process.env.URL || 'http://localhost:8123';
   console.log('OK: back on menu screen after cancel');
 
   // trying to join the cancelled code from a second page should show an error
-  const page2 = await browser.newContext().then((c) => c.newPage());
+  const page2 = await newPage();
   await page2.goto(URL);
   await page2.fill('#input-code', code);
   await page2.click('#btn-join');

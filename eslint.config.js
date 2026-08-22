@@ -6,7 +6,7 @@ const js = require('@eslint/js');
 // catch real bugs (undefined variables, unreachable code, accidental
 // globals) without fighting the project's existing style. Browser globals
 // are listed by hand instead of pulling in the `globals` package, since the
-// project only needs a couple dozen of them across client.js.
+// project only needs a couple dozen of them across public/js/*.
 const browserGlobals = {
   window: 'readonly',
   document: 'readonly',
@@ -75,10 +75,10 @@ module.exports = [
     },
   },
   {
-    files: ['public/client.js'],
+    files: ['public/js/**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
-      sourceType: 'script',
+      sourceType: 'module',
       globals: browserGlobals,
     },
     rules: {

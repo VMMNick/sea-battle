@@ -9,6 +9,36 @@ const { WebSocketServer } = require('ws');
 const PORT = process.env.PORT || 8080;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
+// ---------- Optional Redis-backed room persistence ----------
+// Rooms normally live only in the Node process's memory, so any restart
+// (deploy, crash, a free-tier host putting the dyno to sleep) instantly
+// wipes every active game. If a REDIS_URL is configured we mirror room
+// state into Redis on every meaningful change and reload it at boot, so
+// players can resume mid-game after a restart. With no REDIS_URL set this
+// whole layer is a no-op and behavior is identical to before — no external
+// dependency required for a small/local deployment.
+let Redis = null;
+try {
+  Redis = require('ioredis');
+} catch {
+  // ioredis not installed — fine, persistence is simply unavailable.
+}
+const REDIS_URL = process.env.REDIS_URL || '';
+const ROOM_TTL_SECONDS = 24 * 60 * 60; // abandoned rooms expire from Redis after a day
+const redisKeyFor = (code) => `seabattle:room:${code}`;
+const LEADERBOARD_REDIS_KEY = 'seabattle:leaderboard';
+
+let redis = null;
+if (REDIS_URL) {
+  if (!Redis) {
+    console.warn('[redis] REDIS_URL задано, але пакет ioredis не встановлено — персистентність вимкнена.');
+  } else {
+    redis = new Redis(REDIS_URL, { maxRetriesPerRequest: 2 });
+    redis.on('error', (err) => console.error('[redis] помилка з’єднання:', err.message));
+    redis.on('connect', () => console.log('[redis] підключено, стан кімнат зберігатиметься'));
+  }
+}
+
 // ---------- Static file server ----------
 
 const MIME = {
@@ -51,6 +81,13 @@ const SHIP_LENGTHS = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
 // Скільки часу гравець може бути офлайн (втрата з'єднання, перезавантаження
 // сторінки, закриття вкладки), перш ніж суперник вважатиме гру завершеною.
 const RECONNECT_GRACE_MS = 5 * 60 * 1000;
+
+// Скільки поспіль невдалих спроб приєднання (неіснуючий код) вважається
+// підбором коду, і на скільки блокувати приєднання з цього з'єднання після
+// цього. Налаштовується через env лише для того, щоб тести не чекали
+// реальні 30 секунд.
+const JOIN_LOCKOUT_THRESHOLD = 5;
+const JOIN_LOCKOUT_MS = Number(process.env.SEABATTLE_JOIN_LOCKOUT_MS) || 30000;
 
 function emptyGrid() {
   return Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
@@ -182,10 +219,43 @@ function makeToken() {
   return crypto.randomBytes(12).toString('hex');
 }
 
-function newPlayer(ws) {
+// Filtered by char code rather than a regex control-character class, so the
+// source has no literal control bytes for tools/diffs to trip over. Shared
+// by the nickname and in-game chat sanitizers below.
+function stripControlChars(raw) {
+  return Array.from(String(raw || ''))
+    .filter((ch) => {
+      const code = ch.codePointAt(0);
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join('');
+}
+
+// Trims, strips control characters, and caps length so a nickname is always
+// safe to store, persist, and render as plain text on the leaderboard.
+const MAX_NICKNAME_LENGTH = 20;
+function sanitizeNickname(raw) {
+  const cleaned = stripControlChars(raw).trim().slice(0, MAX_NICKNAME_LENGTH);
+  return cleaned || 'Капітан';
+}
+
+// In-game chat: free text between the two players in a room, capped and
+// stripped the same way as a nickname (never persisted, never sent
+// anywhere except the room's own two sockets).
+const MAX_CHAT_LENGTH = 200;
+function sanitizeChatText(raw) {
+  return stripControlChars(raw).trim().slice(0, MAX_CHAT_LENGTH);
+}
+
+// Emoji quick-reactions are restricted to a fixed allow-list rather than
+// free text, so this channel can never be used to smuggle arbitrary content.
+const CHAT_EMOJI = ['👍', '😂', '😱', '🔥', '🎯', '🙌'];
+
+function newPlayer(ws, nickname) {
   return {
     ws,
     token: makeToken(), // secret used by this player's browser to reconnect to this exact seat
+    nickname: sanitizeNickname(nickname),
     ships: null, // validated ship list with hit tracking
     shotsReceived: emptyGrid(), // what opponent has fired at us: 'hit' | 'miss'
     ready: false,
@@ -195,11 +265,15 @@ function newPlayer(ws) {
   };
 }
 
+const BOT_DIFFICULTIES = ['easy', 'smart', 'expert'];
+
 function newBotPlayer(difficulty) {
   return {
     ws: null,
     isBot: true,
-    difficulty: difficulty === 'easy' ? 'easy' : 'smart', // 'easy' fires blind; 'smart' hunts with the heatmap AI below
+    // 'easy' fires blind; 'smart' hunts with the heatmap AI below; 'expert'
+    // adds the parity optimization on top of the same heatmap.
+    difficulty: BOT_DIFFICULTIES.includes(difficulty) ? difficulty : 'smart',
     token: null,
     ships: null,
     shotsReceived: emptyGrid(),
@@ -218,6 +292,153 @@ function roomShouldBeDeleted(room) {
   const p1Real = p1 && !p1.isBot;
   const p2Real = p2 && !p2.isBot;
   return !p1Real && !p2Real;
+}
+
+// ---------- Redis (de)serialization ----------
+// `ws` sockets and `Set`s aren't JSON-safe and never survive a restart
+// anyway, so we strip/convert them going in and rebuild fresh Sets coming
+// back out. Real WebSocket connections are always null after a reload —
+// a human player must send `resume` with their saved token to reattach.
+
+function serializePlayerForRedis(p) {
+  if (!p) return null;
+  const base = {
+    isBot: !!p.isBot,
+    token: p.token,
+    nickname: p.nickname || null,
+    ships: p.ships ? p.ships.map((s) => ({ cells: s.cells, hits: [...s.hits] })) : null,
+    shotsReceived: p.shotsReceived,
+    ready: !!p.ready,
+    rematchWanted: !!p.rematchWanted,
+    disconnectedAt: p.isBot ? null : p.disconnectedAt,
+  };
+  if (p.isBot) {
+    base.difficulty = p.difficulty;
+    base.ai = { ...p.ai, dead: [...p.ai.dead] };
+  }
+  return base;
+}
+
+function deserializePlayerFromRedis(d) {
+  if (!d) return null;
+  const ships = d.ships ? d.ships.map((s) => ({ cells: s.cells, hits: new Set(s.hits) })) : null;
+  if (d.isBot) {
+    return {
+      ws: null,
+      isBot: true,
+      difficulty: BOT_DIFFICULTIES.includes(d.difficulty) ? d.difficulty : 'smart',
+      token: null,
+      ships,
+      shotsReceived: d.shotsReceived,
+      ready: !!d.ready,
+      rematchWanted: true,
+      connected: true,
+      disconnectedAt: null,
+      ai: d.ai ? { ...d.ai, dead: new Set(d.ai.dead) } : freshBotAI(),
+    };
+  }
+  return {
+    ws: null,
+    token: d.token,
+    nickname: sanitizeNickname(d.nickname),
+    ships,
+    shotsReceived: d.shotsReceived,
+    ready: !!d.ready,
+    rematchWanted: !!d.rematchWanted,
+    connected: false, // must resume with the token to reattach a live socket
+    disconnectedAt: d.disconnectedAt || Date.now(),
+  };
+}
+
+function serializeRoomForRedis(room) {
+  return {
+    code: room.code,
+    phase: room.phase,
+    turn: room.turn,
+    winner: room.winner || null,
+    players: {
+      p1: serializePlayerForRedis(room.players.p1),
+      p2: serializePlayerForRedis(room.players.p2),
+    },
+  };
+}
+
+function deserializeRoomFromRedis(data) {
+  return {
+    code: data.code,
+    phase: data.phase,
+    turn: data.turn,
+    winner: data.winner || null,
+    players: {
+      p1: deserializePlayerFromRedis(data.players.p1),
+      p2: deserializePlayerFromRedis(data.players.p2),
+    },
+  };
+}
+
+// Fire-and-forget: gameplay never waits on Redis. A slow or unreachable
+// Redis degrades persistence, not the live game.
+function persistRoom(room) {
+  if (!redis) return;
+  redis
+    .set(redisKeyFor(room.code), JSON.stringify(serializeRoomForRedis(room)), 'EX', ROOM_TTL_SECONDS)
+    .catch((err) => console.error('[redis] не вдалося зберегти кімнату', room.code, err.message));
+}
+
+function deleteRoomFromRedis(code) {
+  if (!redis) return;
+  redis.del(redisKeyFor(code)).catch((err) => console.error('[redis] не вдалося видалити кімнату', code, err.message));
+}
+
+// Fire-and-forget: the whole leaderboard is tiny (a handful of nicknames),
+// so we just persist it as one JSON blob rather than a Redis hash per entry.
+function persistLeaderboard() {
+  if (!redis) return;
+  const data = [...leaderboard.entries()];
+  redis
+    .set(LEADERBOARD_REDIS_KEY, JSON.stringify(data))
+    .catch((err) => console.error('[redis] не вдалося зберегти таблицю лідерів', err.message));
+}
+
+async function loadLeaderboardFromRedis() {
+  if (!redis) return;
+  try {
+    const raw = await redis.get(LEADERBOARD_REDIS_KEY);
+    if (!raw) return;
+    const data = JSON.parse(raw);
+    if (Array.isArray(data)) {
+      for (const [key, entry] of data) {
+        if (key && entry) leaderboard.set(key, entry);
+      }
+      console.log(`[redis] відновлено таблицю лідерів (${leaderboard.size} гравців)`);
+    }
+  } catch (err) {
+    console.error('[redis] не вдалося завантажити таблицю лідерів:', err.message);
+  }
+}
+
+// Called once at boot: repopulates the in-memory `rooms` Map from whatever
+// survived in Redis, so a resume immediately after a restart finds its room.
+async function loadRoomsFromRedis() {
+  if (!redis) return;
+  try {
+    const keys = await redis.keys('seabattle:room:*');
+    let restored = 0;
+    for (const key of keys) {
+      const raw = await redis.get(key);
+      if (!raw) continue;
+      try {
+        const room = deserializeRoomFromRedis(JSON.parse(raw));
+        rooms.set(room.code, room);
+        restored++;
+      } catch (e) {
+        console.error('[redis] пошкоджений запис кімнати, пропускаю:', key, e.message);
+      }
+    }
+    if (restored) console.log(`[redis] відновлено ${restored} кімнат(и) після перезапуску`);
+  } catch (err) {
+    console.error('[redis] не вдалося завантажити кімнати при старті:', err.message);
+  }
 }
 
 // ---------- Bot AI (probability-density hunt / directional target) ----------
@@ -241,9 +462,100 @@ function botBlocked(tried, ai, r, c) {
   return false;
 }
 
+// Monte Carlo tie-break (the 'expert' difficulty): the per-ship heatmap
+// below often leaves several cells tied for the top score, and 'smart'
+// breaks that tie uniformly at random. 'expert' instead repeatedly tries to
+// drop the *entire* remaining fleet onto the board at once (respecting
+// bounds, already-tried/dead cells, no overlap, no touching) and tallies how
+// often each *tied* cell ends up covered — approximating the true joint
+// probability that a ship occupies it, which per-ship scoring alone can't
+// see. Refining only among cells the heatmap already rated best means
+// 'expert' can never pick a worse cell than 'smart' would — at worst the
+// samples are inconclusive and it falls back to the same random tie-break.
+const MONTE_CARLO_SAMPLES = 400;
+
+function sampleFleetPlacement(lengths, blocked) {
+  const occupied = new Set();
+  const order = [...lengths];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  for (const len of order) {
+    let placed = false;
+    for (let attempt = 0; attempt < 40 && !placed; attempt++) {
+      const horiz = Math.random() < 0.5;
+      const r = crypto.randomInt(SIZE);
+      const c = crypto.randomInt(SIZE);
+      const cells = [];
+      let ok = true;
+      for (let i = 0; i < len; i++) {
+        const rr = horiz ? r : r + i;
+        const cc = horiz ? c + i : c;
+        if (!inBounds(rr, cc) || blocked(rr, cc) || occupied.has(`${rr},${cc}`)) {
+          ok = false;
+          break;
+        }
+        cells.push([rr, cc]);
+      }
+      if (!ok) continue;
+      // no-touch check against ships already placed in this sample
+      for (const [rr, cc] of cells) {
+        for (let dr = -1; dr <= 1 && ok; dr++) {
+          for (let dc = -1; dc <= 1 && ok; dc++) {
+            const nr = rr + dr,
+              nc = cc + dc;
+            if (occupied.has(`${nr},${nc}`) && !cells.some(([xr, xc]) => xr === nr && xc === nc)) ok = false;
+          }
+        }
+      }
+      if (!ok) continue;
+      cells.forEach(([rr, cc]) => occupied.add(`${rr},${cc}`));
+      placed = true;
+    }
+    if (!placed) return null;
+  }
+  return occupied;
+}
+
+// Re-ranks a set of cells that are already tied for the top heatmap score,
+// using how often each one is covered across many random whole-fleet
+// placements. Returns the (possibly smaller) subset that came out on top of
+// that resampling, or the original list unchanged if too few samples landed
+// to say anything meaningful — so this can only narrow the choice among
+// already-equally-good cells, never steer toward a worse one.
+function monteCarloRefineTiebreak(tiedCells, lengths, blocked) {
+  if (tiedCells.length <= 1) return tiedCells;
+  const tally = new Map(tiedCells.map(([r, c]) => [`${r},${c}`, 0]));
+  let validSamples = 0;
+  for (let s = 0; s < MONTE_CARLO_SAMPLES; s++) {
+    const occupied = sampleFleetPlacement(lengths, blocked);
+    if (!occupied) continue;
+    validSamples++;
+    for (const key of occupied) {
+      if (tally.has(key)) tally.set(key, tally.get(key) + 1);
+    }
+  }
+  if (!validSamples) return tiedCells;
+
+  let best = -1;
+  let bestKeys = [];
+  for (const [key, v] of tally) {
+    if (v > best) {
+      best = v;
+      bestKeys = [key];
+    } else if (v === best) {
+      bestKeys.push(key);
+    }
+  }
+  return bestKeys.map((k) => k.split(',').map(Number));
+}
+
 // Picks the bot's next shot against `target` (the human player object),
 // using its own shotsReceived grid as the source of truth for "already tried".
-function pickBotMove(target, ai) {
+// `useExpert` ('expert' difficulty) refines heatmap ties with the Monte
+// Carlo sampler above instead of breaking them uniformly at random.
+function pickBotMove(target, ai, useExpert) {
   const tried = target.shotsReceived;
 
   // Target mode: we have a live hit and are hunting down the rest of that ship.
@@ -329,7 +641,8 @@ function pickBotMove(target, ai) {
     }
   }
   if (!bestCells.length) return null; // board fully tried (shouldn't happen before game ends)
-  return bestCells[crypto.randomInt(bestCells.length)];
+  const finalCells = useExpert ? monteCarloRefineTiebreak(bestCells, lengths, cellBlocked) : bestCells;
+  return finalCells[crypto.randomInt(finalCells.length)];
 }
 
 // 'Легкий' бот: жодного полювання чи прицілювання — просто випадкова
@@ -443,6 +756,63 @@ function buildResumeSnapshot(room, myKey) {
 
 const rooms = new Map(); // code -> room
 
+// ---------- Leaderboard ----------
+// Global, cross-room win tally keyed by a lowercased nickname (so "Коля" and
+// "коля" share one entry); only human-vs-human games count, so nobody can
+// pad their record by beating the easy bot in a loop. Tiny enough to keep as
+// a single in-memory Map, mirrored to Redis as one JSON blob when available.
+const leaderboard = new Map(); // lowercase nickname -> { name, wins, games }
+const LEADERBOARD_TOP_N = 10;
+
+function recordLeaderboardResult(room, winnerKey) {
+  const winner = room.players[winnerKey];
+  const loser = room.players[otherKey(winnerKey)];
+  if (!winner || !loser || winner.isBot || loser.isBot) return; // bot games don't count
+  for (const p of [winner, loser]) {
+    const key = p.nickname.toLowerCase();
+    const entry = leaderboard.get(key) || { name: p.nickname, wins: 0, games: 0 };
+    entry.name = p.nickname; // keep the most recently used casing
+    entry.games += 1;
+    if (p === winner) entry.wins += 1;
+    leaderboard.set(key, entry);
+  }
+  persistLeaderboard();
+}
+
+function getTopLeaderboard() {
+  return [...leaderboard.values()]
+    .sort((a, b) => b.wins - a.wins || b.wins / b.games - a.wins / a.games || a.name.localeCompare(b.name))
+    .slice(0, LEADERBOARD_TOP_N)
+    .map((e) => ({ name: e.name, wins: e.wins, games: e.games }));
+}
+
+// ---------- Quick match ----------
+// A simple FIFO queue: the first connection to ask for a quick match waits
+// here until a second one asks, at which point they're paired into a fresh
+// room together — no code to type or share. `setRoomCode`/`setMyKey` let the
+// *other* connection's message handler (which is what actually finds the
+// match) reach into the waiting connection's own per-connection closure
+// state, since that's private to the `wss.on('connection', ...)` scope it
+// was created in.
+const quickMatchQueue = [];
+
+function removeFromQuickMatchQueue(ws) {
+  const idx = quickMatchQueue.findIndex((e) => e.ws === ws);
+  if (idx !== -1) quickMatchQueue.splice(idx, 1);
+}
+
+// Pops the oldest still-connected waiting entry, skipping (and discarding)
+// any that went stale (closed) while queued.
+function popQuickMatchOpponent(ws) {
+  while (quickMatchQueue.length) {
+    const entry = quickMatchQueue.shift();
+    if (entry.ws === ws) continue; // shouldn't happen, but never match with self
+    if (entry.ws.readyState !== entry.ws.OPEN) continue;
+    return entry;
+  }
+  return null;
+}
+
 function send(ws, msg) {
   if (ws && ws.readyState === ws.OPEN) {
     ws.send(JSON.stringify(msg));
@@ -499,8 +869,10 @@ function performFire(room, shooterKey, r, c) {
     room.phase = 'over';
     room.winner = shooterKey;
     broadcastRoom(room, { type: 'game_over', winner: shooterKey });
+    recordLeaderboardResult(room, shooterKey);
   }
 
+  persistRoom(room);
   return { result: win ? 'win' : result, win };
 }
 
@@ -519,7 +891,8 @@ function scheduleBotMove(room) {
       // re-check everything: the room/game may have moved on while we waited
       if (room.phase !== 'battle' || room.turn !== botKey) return;
       if (!rooms.get(room.code) || rooms.get(room.code) !== room) return;
-      const move = bot.difficulty === 'easy' ? pickBotMoveEasy(target) : pickBotMove(target, bot.ai);
+      const move =
+        bot.difficulty === 'easy' ? pickBotMoveEasy(target) : pickBotMove(target, bot.ai, bot.difficulty === 'expert');
       if (!move) return;
       const [r, c] = move;
       const { result } = performFire(room, botKey, r, c);
@@ -574,6 +947,17 @@ wss.on('connection', (ws) => {
   // is separate and more generous since rapid clicking during real play is normal.
   const roomLimiter = makeRateLimiter(10, 60000); // 10 per minute
   const fireLimiter = makeRateLimiter(40, 10000); // 40 per 10s
+  const chatLimiter = makeRateLimiter(20, 10000); // 20 chat/reaction messages per 10s
+
+  // Room codes are only 4 characters (~1.6M combinations), so the generic
+  // roomLimiter above (10 room actions/min) isn't tight enough on its own to
+  // discourage guessing a code to sneak into someone else's game. Track
+  // consecutive *wrong-code* join attempts specifically and lock this
+  // connection out of joining for a cooldown once it looks like guessing
+  // rather than a typo. A full room or an already-taken code don't count —
+  // those aren't evidence of guessing.
+  let failedJoinAttempts = 0;
+  let joinLockedUntil = 0;
 
   let roomCode = null;
   let myKey = null; // 'p1' | 'p2'
@@ -586,62 +970,134 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if (msg.type === 'create' || msg.type === 'create_bot' || msg.type === 'join') {
+    if (msg.type === 'create' || msg.type === 'create_bot' || msg.type === 'join' || msg.type === 'quick_match') {
       if (!roomLimiter()) {
-        send(ws, { type: 'error', message: 'Забагато спроб поспіль. Зачекайте трохи і спробуйте ще раз.' });
+        send(ws, {
+          type: 'error',
+          errorCode: 'too_many_room_actions',
+          message: 'Забагато спроб поспіль. Зачекайте трохи і спробуйте ще раз.',
+        });
         return;
       }
+    }
+
+    if (msg.type === 'get_leaderboard') {
+      send(ws, { type: 'leaderboard', top: getTopLeaderboard() });
+      return;
     }
 
     if (msg.type === 'create') {
       const code = makeRoomCode();
       const room = {
         code,
-        players: { p1: newPlayer(ws), p2: null },
+        players: { p1: newPlayer(ws, msg.nickname), p2: null },
         phase: 'waiting', // waiting -> placement -> battle -> over
         turn: 'p1',
       };
       rooms.set(code, room);
       roomCode = code;
       myKey = 'p1';
+      persistRoom(room);
       send(ws, { type: 'created', code, player: 'p1', token: room.players.p1.token });
       return;
     }
 
     if (msg.type === 'create_bot') {
-      const difficulty = msg.difficulty === 'easy' ? 'easy' : 'smart';
+      const difficulty = BOT_DIFFICULTIES.includes(msg.difficulty) ? msg.difficulty : 'smart';
       const code = makeRoomCode();
       const room = {
         code,
-        players: { p1: newPlayer(ws), p2: newBotPlayer(difficulty) },
+        players: { p1: newPlayer(ws, msg.nickname), p2: newBotPlayer(difficulty) },
         phase: 'placement', // the "seat" is already filled, so skip the waiting room entirely
         turn: 'p1',
       };
       rooms.set(code, room);
       roomCode = code;
       myKey = 'p1';
+      persistRoom(room);
       send(ws, { type: 'bot_created', code, player: 'p1', token: room.players.p1.token, difficulty });
       return;
     }
 
     if (msg.type === 'join') {
+      const now = Date.now();
+      if (now < joinLockedUntil) {
+        send(ws, {
+          type: 'error',
+          errorCode: 'join_locked',
+          errorVars: { seconds: Math.ceil((joinLockedUntil - now) / 1000) },
+          message: `Забагато невдалих спроб приєднання. Спробуйте ще раз через ${Math.ceil((joinLockedUntil - now) / 1000)} с.`,
+        });
+        return;
+      }
       const code = String(msg.code || '')
         .toUpperCase()
         .trim();
       const room = rooms.get(code);
       if (!room) {
-        send(ws, { type: 'error', message: 'Кімнату не знайдено. Перевірте код.' });
+        failedJoinAttempts++;
+        if (failedJoinAttempts >= JOIN_LOCKOUT_THRESHOLD) {
+          joinLockedUntil = now + JOIN_LOCKOUT_MS;
+          failedJoinAttempts = 0;
+          send(ws, {
+            type: 'error',
+            errorCode: 'join_locked',
+            errorVars: { seconds: Math.ceil(JOIN_LOCKOUT_MS / 1000) },
+            message: `Забагато невдалих спроб приєднання. Спробуйте ще раз через ${Math.ceil(JOIN_LOCKOUT_MS / 1000)} с.`,
+          });
+          return;
+        }
+        send(ws, { type: 'error', errorCode: 'room_not_found', message: 'Кімнату не знайдено. Перевірте код.' });
         return;
       }
       if (room.players.p2 && room.players.p2.connected) {
-        send(ws, { type: 'error', message: 'Кімната вже заповнена.' });
+        send(ws, { type: 'error', errorCode: 'room_full', message: 'Кімната вже заповнена.' });
         return;
       }
-      room.players.p2 = newPlayer(ws);
+      failedJoinAttempts = 0;
+      room.players.p2 = newPlayer(ws, msg.nickname);
       roomCode = code;
       myKey = 'p2';
       room.phase = 'placement';
+      persistRoom(room);
       send(ws, { type: 'joined', code, player: 'p2', token: room.players.p2.token });
+      broadcastRoom(room, { type: 'start_placement' });
+      return;
+    }
+
+    if (msg.type === 'quick_match') {
+      const opponent = popQuickMatchOpponent(ws);
+      if (!opponent) {
+        quickMatchQueue.push({
+          ws,
+          nickname: sanitizeNickname(msg.nickname),
+          setRoomCode: (v) => {
+            roomCode = v;
+          },
+          setMyKey: (v) => {
+            myKey = v;
+          },
+        });
+        send(ws, { type: 'quick_match_waiting' });
+        return;
+      }
+      const code = makeRoomCode();
+      const p1 = newPlayer(opponent.ws, opponent.nickname);
+      const p2 = newPlayer(ws, msg.nickname);
+      const room = {
+        code,
+        players: { p1, p2 },
+        phase: 'placement', // both seats are already filled — skip the waiting room entirely
+        turn: 'p1',
+      };
+      rooms.set(code, room);
+      opponent.setRoomCode(code);
+      opponent.setMyKey('p1');
+      roomCode = code;
+      myKey = 'p2';
+      persistRoom(room);
+      send(opponent.ws, { type: 'quick_matched', code, player: 'p1', token: p1.token });
+      send(ws, { type: 'quick_matched', code, player: 'p2', token: p2.token });
       broadcastRoom(room, { type: 'start_placement' });
       return;
     }
@@ -653,12 +1109,16 @@ wss.on('connection', (ws) => {
       const token = String(msg.token || '');
       const room = rooms.get(code);
       if (!room) {
-        send(ws, { type: 'resume_failed', message: 'Цю гру не знайдено — можливо, вона вже завершилась.' });
+        send(ws, {
+          type: 'resume_failed',
+          errorCode: 'resume_not_found',
+          message: 'Цю гру не знайдено — можливо, вона вже завершилась.',
+        });
         return;
       }
       const foundKey = ['p1', 'p2'].find((k) => room.players[k] && room.players[k].token === token);
       if (!foundKey) {
-        send(ws, { type: 'resume_failed', message: 'Не вдалося відновити сесію цієї гри.' });
+        send(ws, { type: 'resume_failed', errorCode: 'resume_lost', message: 'Не вдалося відновити сесію цієї гри.' });
         return;
       }
       const me = room.players[foundKey];
@@ -667,6 +1127,7 @@ wss.on('connection', (ws) => {
       me.disconnectedAt = null;
       roomCode = code;
       myKey = foundKey;
+      persistRoom(room);
 
       send(ws, buildResumeSnapshot(room, foundKey));
 
@@ -678,13 +1139,19 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'leave') {
+      removeFromQuickMatchQueue(ws); // no-op if we weren't queued
       if (roomCode && myKey) {
         const room = rooms.get(roomCode);
         if (room) {
           const opp = room.players[otherKey(myKey)];
           room.players[myKey] = null;
           if (opp && !opp.isBot) send(opp.ws, { type: 'opponent_left' });
-          if (roomShouldBeDeleted(room)) rooms.delete(roomCode);
+          if (roomShouldBeDeleted(room)) {
+            rooms.delete(roomCode);
+            deleteRoomFromRedis(roomCode);
+          } else {
+            persistRoom(room);
+          }
         }
       }
       roomCode = null;
@@ -698,10 +1165,39 @@ wss.on('connection', (ws) => {
     if (!me) return;
     const opp = room.players[otherKey(myKey)];
 
+    if (msg.type === 'chat') {
+      if (!chatLimiter()) {
+        send(ws, {
+          type: 'error',
+          errorCode: 'too_many_chat',
+          message: 'Забагато повідомлень поспіль. Зачекайте трохи.',
+        });
+        return;
+      }
+      const text = sanitizeChatText(msg.text);
+      if (!text) return;
+      broadcastRoom(room, { type: 'chat', from: myKey, text });
+      return;
+    }
+
+    if (msg.type === 'reaction') {
+      if (!chatLimiter()) {
+        send(ws, {
+          type: 'error',
+          errorCode: 'too_many_chat',
+          message: 'Забагато повідомлень поспіль. Зачекайте трохи.',
+        });
+        return;
+      }
+      if (!CHAT_EMOJI.includes(msg.emoji)) return;
+      broadcastRoom(room, { type: 'reaction', from: myKey, emoji: msg.emoji });
+      return;
+    }
+
     if (msg.type === 'place') {
       const validated = validateShips(msg.ships);
       if (!validated) {
-        send(ws, { type: 'error', message: 'Некоректне розташування кораблів.' });
+        send(ws, { type: 'error', errorCode: 'invalid_placement', message: 'Некоректне розташування кораблів.' });
         return;
       }
       me.ships = validated;
@@ -721,23 +1217,28 @@ wss.on('connection', (ws) => {
         broadcastRoom(room, { type: 'battle_start', turn: room.turn });
         scheduleBotMove(room);
       }
+      persistRoom(room);
       return;
     }
 
     if (msg.type === 'fire') {
       if (!fireLimiter()) {
-        send(ws, { type: 'error', message: 'Забагато пострілів поспіль. Зачекайте секунду.' });
+        send(ws, {
+          type: 'error',
+          errorCode: 'too_many_shots',
+          message: 'Забагато пострілів поспіль. Зачекайте секунду.',
+        });
         return;
       }
       if (room.phase !== 'battle') return;
       if (room.turn !== myKey) {
-        send(ws, { type: 'error', message: 'Зараз не ваш хід.' });
+        send(ws, { type: 'error', errorCode: 'not_your_turn', message: 'Зараз не ваш хід.' });
         return;
       }
       const { r, c } = msg;
       if (!Number.isInteger(r) || !Number.isInteger(c) || !inBounds(r, c)) return;
       if (opp.shotsReceived[r][c]) {
-        send(ws, { type: 'error', message: 'Сюди вже стріляли.' });
+        send(ws, { type: 'error', errorCode: 'already_fired', message: 'Сюди вже стріляли.' });
         return;
       }
 
@@ -750,6 +1251,7 @@ wss.on('connection', (ws) => {
       if (opp && opp.isBot) {
         resetRoomForRematch(room);
         broadcastRoom(room, { type: 'start_placement' });
+        persistRoom(room);
         return;
       }
       me.rematchWanted = true;
@@ -760,11 +1262,13 @@ wss.on('connection', (ws) => {
         resetRoomForRematch(room);
         broadcastRoom(room, { type: 'start_placement' });
       }
+      persistRoom(room);
       return;
     }
   });
 
   ws.on('close', () => {
+    removeFromQuickMatchQueue(ws); // in case we were still waiting in the queue, not yet in a room
     if (!roomCode || !myKey) return;
     const room = rooms.get(roomCode);
     if (!room) return;
@@ -777,6 +1281,7 @@ wss.on('connection', (ws) => {
     me.connected = false;
     me.disconnectedAt = Date.now();
     const disconnectedKey = myKey;
+    persistRoom(room);
 
     const opp = room.players[otherKey(disconnectedKey)];
     if (opp && opp.connected) {
@@ -797,7 +1302,12 @@ wss.on('connection', (ws) => {
         send(stillOpp.ws, { type: 'opponent_gave_up' });
       }
       r.players[disconnectedKey] = null;
-      if (roomShouldBeDeleted(r)) rooms.delete(roomCode);
+      if (roomShouldBeDeleted(r)) {
+        rooms.delete(roomCode);
+        deleteRoomFromRedis(roomCode);
+      } else {
+        persistRoom(r);
+      }
     }, RECONNECT_GRACE_MS);
   });
 });
@@ -813,8 +1323,10 @@ const interval = setInterval(() => {
 
 wss.on('close', () => clearInterval(interval));
 
-server.listen(PORT, () => {
-  console.log(`Sea Battle server listening on port ${PORT}`);
+Promise.all([loadRoomsFromRedis(), loadLeaderboardFromRedis()]).finally(() => {
+  server.listen(PORT, () => {
+    console.log(`Sea Battle server listening on port ${PORT}`);
+  });
 });
 
 // ---------- Graceful shutdown ----------
@@ -841,6 +1353,7 @@ function shutdownGracefully(signal) {
     clearInterval(interval);
     server.close(() => process.exit(0));
     wss.clients.forEach((ws) => ws.close(1001, 'Server restarting'));
+    if (redis) redis.disconnect();
     // Belt-and-braces: force-exit shortly after in case something (a slow
     // client, a half-open socket) keeps the process alive past close().
     setTimeout(() => process.exit(0), 3000).unref();

@@ -7,6 +7,11 @@ const URL = process.env.URL || 'http://localhost:8123';
   const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
   const ctx1 = await browser.newContext();
   const ctx2 = await browser.newContext();
+  // This test isn't exercising the onboarding tutorial — pre-seed the "seen"
+  // flag so the modal doesn't pop up and intercept clicks on the menu
+  // buttons (see test/e2e_onboarding.js for the dedicated onboarding test).
+  await ctx1.addInitScript(() => localStorage.setItem('seabattle_onboarding_seen', '1'));
+  await ctx2.addInitScript(() => localStorage.setItem('seabattle_onboarding_seen', '1'));
   const page1 = await ctx1.newPage();
   const page2 = await ctx2.newPage();
 

@@ -39,34 +39,123 @@
      візуально прихований, нічого не змінює на екрані. -->
     <div id="aria-announcer" class="visually-hidden" aria-live="polite" aria-atomic="true"></div>
 
+    <!-- Короткий тур для нових гравців: показується один раз автоматично при
+         першому візиті (якщо немає збереженої сесії), і будь-коли повторно —
+         кнопкою ❓ у шапці. -->
+    <div id="onboarding-overlay" class="modal-overlay hidden">
+      <div class="panel center modal-panel" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <h2 id="onboarding-title" data-i18n="onboarding.title">👋 Як грати</h2>
+        <ol class="onboarding-steps">
+          <li data-i18n="onboarding.step1">
+            🎯 Створіть гру й поділіться кодом, приєднайтеся за кодом друга, або натисніть «⚡ Швидка гра» — сервер
+            миттєво знайде суперника. Можна й проти бота: оберіть складність і починайте одразу.
+          </li>
+          <li data-i18n="onboarding.step2">
+            🚢 Розставте кораблі: клік на клітинку — поставити, клавіша R або кнопка ⟳ — обертати, «🎲 Випадково» —
+            розставити миттєво.
+          </li>
+          <li data-i18n="onboarding.step3">
+            💥 У бою стріляйте по клітинках суперника (клік по правій дошці). Влучання дає ще один постріл. Перемагає
+            той, хто першим потопить увесь ворожий флот.
+          </li>
+          <li data-i18n="onboarding.step4">
+            💬 У грі проти іншого гравця доступні чат і emoji-реакції, а перемоги потрапляють у таблицю лідерів 🏆 —
+            встановіть нікнейм у налаштуваннях ⚙️.
+          </li>
+          <li data-i18n="onboarding.step5">
+            🌐 Мову інтерфейсу, звук, вібрацію й тему можна будь-коли змінити в налаштуваннях ⚙️.
+          </li>
+        </ol>
+        <button id="btn-onboarding-close" class="btn btn-primary btn-wide" data-i18n="onboarding.close">
+          Зрозуміло, почати гру
+        </button>
+      </div>
+    </div>
+
     <header>
-      <button id="btn-home" class="btn-icon btn-home" type="button" aria-label="На головну" title="На головну">
+      <button
+        id="btn-home"
+        class="btn-icon btn-home"
+        type="button"
+        data-i18n-aria-label="header.home"
+        data-i18n-title="header.home"
+      >
         🚢
+      </button>
+      <button
+        id="btn-leaderboard"
+        class="btn-icon btn-leaderboard"
+        type="button"
+        data-i18n-aria-label="header.leaderboard"
+        data-i18n-title="header.leaderboard"
+      >
+        🏆
+      </button>
+      <button
+        id="btn-help"
+        class="btn-icon btn-help"
+        type="button"
+        data-i18n-aria-label="header.help"
+        data-i18n-title="header.help"
+      >
+        ❓
       </button>
       <button
         id="btn-settings"
         class="btn-icon"
         type="button"
-        aria-label="Налаштування звуку, вібрації та теми"
-        title="Налаштування"
+        data-i18n-aria-label="header.settings"
+        data-i18n-title="header.settingsTitle"
       >
         ⚙️
       </button>
       <div id="settings-panel" class="settings-panel hidden">
+        <label class="settings-row settings-row-nickname">
+          <span data-i18n="settings.nicknameLabel">🧑‍✈️ Нікнейм</span>
+          <input
+            type="text"
+            id="input-nickname"
+            maxlength="20"
+            data-i18n-placeholder="settings.nicknamePlaceholder"
+            autocomplete="off"
+            data-i18n-aria-label="settings.nicknameAria"
+          />
+        </label>
         <label class="settings-row">
           <input type="checkbox" id="toggle-sound" />
-          <span>🔊 Звук</span>
+          <span data-i18n="settings.sound">🔊 Звук</span>
         </label>
         <label class="settings-row">
           <input type="checkbox" id="toggle-vibration" />
-          <span>📳 Вібрація</span>
+          <span data-i18n="settings.vibration">📳 Вібрація</span>
         </label>
         <label class="settings-row">
           <input type="checkbox" id="toggle-theme" />
-          <span>☀️ Світла тема</span>
+          <span data-i18n="settings.theme">☀️ Світла тема</span>
         </label>
+        <div class="settings-row settings-row-lang">
+          <span data-i18n="settings.language">🌐 Мова / Language</span>
+          <div class="lang-toggle" role="radiogroup" aria-label="Мова інтерфейсу / Interface language">
+            <button
+              type="button"
+              class="btn-lang active"
+              id="btn-lang-uk"
+              data-locale="uk"
+              role="radio"
+              aria-checked="true"
+            >
+              UA
+            </button>
+            <button type="button" class="btn-lang" id="btn-lang-en" data-locale="en" role="radio" aria-checked="false">
+              EN
+            </button>
+          </div>
+        </div>
       </div>
-      <h1>⚓ Морський бій</h1>
+      <h1 data-i18n="app.heading">⚓ Морський бій</h1>
+      <!-- No data-i18n here on purpose: this text is fully owned by setStatus() calls
+           at runtime, and re-applying a static translation on every locale switch would
+           stomp whatever real status is currently showing (see i18n.js's top comment). -->
       <div id="status-bar" class="status-bar">Підключення до сервера…</div>
       <div id="opp-status-banner" class="opp-status-banner hidden"></div>
     </header>
@@ -75,8 +164,10 @@
       <!-- ЕКРАН: Відновлення попередньої гри -->
       <section id="screen-resuming" class="screen hidden">
         <div class="panel center">
-          <h2>Відновлюємо вашу гру…</h2>
-          <p class="hint">Ви виходили з незавершеної партії — повертаємо вас туди, де зупинились.</p>
+          <h2 data-i18n="resuming.title">Відновлюємо вашу гру…</h2>
+          <p class="hint" data-i18n="resuming.hint">
+            Ви виходили з незавершеної партії — повертаємо вас туди, де зупинились.
+          </p>
           <div class="spinner"></div>
         </div>
       </section>
@@ -86,13 +177,26 @@
         <div id="stats-bar" class="stats-bar hidden"></div>
         <div class="menu-primary-row">
           <div class="panel menu-card">
-            <h2>🎯 Створити гру</h2>
-            <p>Отримайте код і надішліть його другу, щоб пограти онлайн.</p>
-            <button id="btn-create" class="btn btn-primary btn-wide">Створити нову гру</button>
+            <h2 data-i18n="menu.createTitle">🎯 Створити гру</h2>
+            <p data-i18n="menu.createBody">Отримайте код і надішліть його другу, щоб пограти онлайн.</p>
+            <button id="btn-create" class="btn btn-primary btn-wide" data-i18n="menu.createBtn">
+              Створити нову гру
+            </button>
           </div>
           <div class="panel menu-card">
-            <h2>🤖 Грати проти бота</h2>
-            <p>Без другого гравця — розставте кораблі й одразу починайте бій проти комп'ютера.</p>
+            <h2 data-i18n="menu.quickTitle">⚡ Швидка гра</h2>
+            <p data-i18n="menu.quickBody">
+              Миттєво приєднаємо вас до іншого гравця, який теж шукає партію просто зараз.
+            </p>
+            <button id="btn-quick-match" class="btn btn-primary btn-wide" data-i18n="menu.quickBtn">
+              Знайти суперника
+            </button>
+          </div>
+          <div class="panel menu-card">
+            <h2 data-i18n="menu.botTitle">🤖 Грати проти бота</h2>
+            <p data-i18n="menu.botBody">
+              Без другого гравця — розставте кораблі й одразу починайте бій проти комп'ютера.
+            </p>
             <div class="difficulty-row" role="radiogroup" aria-label="Складність бота">
               <button
                 type="button"
@@ -101,6 +205,7 @@
                 data-difficulty="easy"
                 role="radio"
                 aria-checked="false"
+                data-i18n="menu.diffEasy"
               >
                 🎯 Легкий
               </button>
@@ -111,86 +216,169 @@
                 data-difficulty="smart"
                 role="radio"
                 aria-checked="true"
+                data-i18n="menu.diffSmart"
               >
                 🧠 Розумний
               </button>
+              <button
+                type="button"
+                class="btn-diff"
+                id="btn-diff-expert"
+                data-difficulty="expert"
+                role="radio"
+                aria-checked="false"
+                data-i18n="menu.diffExpert"
+              >
+                🎓 Експерт
+              </button>
             </div>
-            <button id="btn-create-bot" class="btn btn-bot btn-wide">Грати проти бота</button>
+            <button id="btn-create-bot" class="btn btn-bot btn-wide" data-i18n="menu.botBtn">Грати проти бота</button>
           </div>
         </div>
         <div class="panel">
-          <h2>Приєднатися до гри</h2>
-          <p>Введіть код кімнати, який вам надіслали.</p>
+          <h2 data-i18n="menu.joinTitle">Приєднатися до гри</h2>
+          <p data-i18n="menu.joinBody">Введіть код кімнати, який вам надіслали.</p>
           <div class="join-row">
-            <input id="input-code" maxlength="4" placeholder="КОД" autocomplete="off" />
-            <button id="btn-join" class="btn btn-primary">Приєднатися</button>
+            <input id="input-code" maxlength="4" data-i18n-placeholder="menu.joinCodePlaceholder" autocomplete="off" />
+            <button id="btn-join" class="btn btn-primary" data-i18n="menu.joinBtn">Приєднатися</button>
           </div>
           <p id="menu-error" class="error-text"></p>
+        </div>
+      </section>
+
+      <!-- ЕКРАН: Таблиця лідерів -->
+      <section id="screen-leaderboard" class="screen hidden">
+        <div class="panel center">
+          <h2 data-i18n="leaderboard.title">🏆 Таблиця лідерів</h2>
+          <p class="hint" data-i18n="leaderboard.hint">
+            Перемоги в іграх проти інших гравців (не проти бота). Встановіть свій нікнейм у налаштуваннях ⚙️, щоб
+            з'явитися тут.
+          </p>
+          <ol id="leaderboard-list" class="leaderboard-list"></ol>
+          <p id="leaderboard-empty" class="note hidden" data-i18n="leaderboard.empty">
+            Поки що немає жодної завершеної гри між гравцями.
+          </p>
+          <button id="btn-leaderboard-back" class="btn" data-i18n="leaderboard.back">У головне меню</button>
         </div>
       </section>
 
       <!-- ЕКРАН: Очікування суперника -->
       <section id="screen-waiting" class="screen hidden">
         <div class="panel center">
-          <h2>Очікуємо суперника…</h2>
-          <p>Надішліть цей код другу або скопіюйте посилання — за ним гра відкриється й одразу приєднає:</p>
+          <h2 data-i18n="waiting.title">Очікуємо суперника…</h2>
+          <p data-i18n="waiting.body">
+            Надішліть цей код другу або скопіюйте посилання — за ним гра відкриється й одразу приєднає:
+          </p>
           <div id="room-code" class="room-code"></div>
-          <button id="btn-copy-code" class="btn">Скопіювати посилання</button>
+          <button id="btn-copy-code" class="btn" data-i18n="waiting.copy">Скопіювати посилання</button>
           <div class="spinner"></div>
-          <button id="btn-cancel-waiting" class="btn btn-cancel">Скасувати</button>
+          <button id="btn-cancel-waiting" class="btn btn-cancel" data-i18n="waiting.cancel">Скасувати</button>
+        </div>
+      </section>
+
+      <!-- ЕКРАН: Пошук суперника для швидкої гри -->
+      <section id="screen-quickmatch" class="screen hidden">
+        <div class="panel center">
+          <h2 data-i18n="quickmatch.title">Шукаємо суперника…</h2>
+          <p data-i18n="quickmatch.body">
+            Ви приєднаєтесь автоматично, щойно знайдеться інший гравець, який теж шукає партію.
+          </p>
+          <div class="spinner"></div>
+          <button id="btn-cancel-quickmatch" class="btn btn-cancel" data-i18n="quickmatch.cancel">Скасувати</button>
         </div>
       </section>
 
       <!-- ЕКРАН: Розстановка кораблів -->
       <section id="screen-placement" class="screen hidden">
         <div class="panel center">
-          <h2>Розставте кораблі</h2>
-          <p class="hint">
+          <h2 data-i18n="placement.title">Розставте кораблі</h2>
+          <p class="hint" data-i18n-html="placement.hintHtml">
             Клікніть на клітинку, щоб поставити корабель. Клавіша <b>R</b> або кнопка — обертання. Кораблі не можуть
             торкатися одне одного.
           </p>
           <div class="fleet-status" id="fleet-status"></div>
           <div class="placement-controls">
-            <button id="btn-rotate" class="btn">⟳ Обертати (R)</button>
-            <button id="btn-random" class="btn">🎲 Випадково</button>
-            <button id="btn-clear" class="btn">✕ Очистити</button>
+            <button id="btn-rotate" class="btn" data-i18n="placement.rotate">⟳ Обертати (R)</button>
+            <button id="btn-random" class="btn" data-i18n="placement.random">🎲 Випадково</button>
+            <button id="btn-clear" class="btn" data-i18n="placement.clear">✕ Очистити</button>
           </div>
           <div id="grid-own" class="grid"></div>
-          <button id="btn-ready" class="btn btn-primary btn-wide" disabled>Готово, чекати суперника</button>
-          <p id="opp-ready-note" class="note hidden">Суперник вже готовий і чекає на вас!</p>
+          <button id="btn-ready" class="btn btn-primary btn-wide" disabled data-i18n="placement.ready">
+            Готово, чекати суперника
+          </button>
+          <p id="opp-ready-note" class="note hidden" data-i18n="placement.oppReady">
+            Суперник вже готовий і чекає на вас!
+          </p>
         </div>
       </section>
 
       <!-- ЕКРАН: Бій -->
       <section id="screen-battle" class="screen hidden">
-        <div class="battle-turn" id="battle-turn">Хід гравця…</div>
+        <div class="battle-turn" id="battle-turn" data-i18n="battle.turnPlaceholder">Хід гравця…</div>
         <div class="boards">
           <div class="board-wrap">
-            <h3>Ваш флот</h3>
+            <h3 data-i18n="battle.myFleet">Ваш флот</h3>
             <div id="grid-self" class="grid grid-small"></div>
           </div>
           <div class="board-wrap">
+            <!-- No data-i18n: owned by setEnemyBoardTitle() at runtime (it varies by vsBot). -->
             <h3 id="enemy-board-title">Флот суперника</h3>
             <div id="grid-enemy" class="grid"></div>
           </div>
         </div>
         <div class="shot-log-wrap">
-          <h3 class="shot-log-title">Історія пострілів</h3>
+          <h3 class="shot-log-title" data-i18n="battle.shotLogTitle">Історія пострілів</h3>
           <ul id="shot-log" class="shot-log"></ul>
+        </div>
+        <div id="chat-wrap" class="chat-wrap">
+          <h3 class="chat-title" data-i18n="chat.title">💬 Чат із суперником</h3>
+          <ul id="chat-log" class="chat-log" aria-live="polite"></ul>
+          <div class="chat-reactions" role="group" aria-label="Швидкі реакції">
+            <button type="button" class="btn-reaction" data-emoji="👍" data-i18n-aria-label="chat.reactionThumbsUp">
+              👍
+            </button>
+            <button type="button" class="btn-reaction" data-emoji="😂" data-i18n-aria-label="chat.reactionLaugh">
+              😂
+            </button>
+            <button type="button" class="btn-reaction" data-emoji="😱" data-i18n-aria-label="chat.reactionShock">
+              😱
+            </button>
+            <button type="button" class="btn-reaction" data-emoji="🔥" data-i18n-aria-label="chat.reactionFire">
+              🔥
+            </button>
+            <button type="button" class="btn-reaction" data-emoji="🎯" data-i18n-aria-label="chat.reactionTarget">
+              🎯
+            </button>
+            <button type="button" class="btn-reaction" data-emoji="🙌" data-i18n-aria-label="chat.reactionClap">
+              🙌
+            </button>
+          </div>
+          <form id="chat-form" class="chat-form">
+            <input
+              id="chat-input"
+              type="text"
+              maxlength="200"
+              data-i18n-placeholder="chat.inputPlaceholder"
+              autocomplete="off"
+              data-i18n-aria-label="chat.inputAria"
+            />
+            <button type="submit" class="btn">➤</button>
+          </form>
         </div>
       </section>
 
       <!-- ЕКРАН: Кінець гри -->
       <section id="screen-over" class="screen hidden">
         <div class="panel center">
+          <!-- No data-i18n: always overwritten with the win/lose text before this screen shows. -->
           <h2 id="over-title">Гру завершено</h2>
-          <button id="btn-rematch" class="btn btn-primary">Реванш</button>
-          <button id="btn-menu" class="btn">У головне меню</button>
-          <p id="rematch-note" class="note hidden">Суперник хоче реванш!</p>
+          <button id="btn-rematch" class="btn btn-primary" data-i18n="over.rematch">Реванш</button>
+          <button id="btn-menu" class="btn" data-i18n="over.menu">У головне меню</button>
+          <p id="rematch-note" class="note hidden" data-i18n="over.oppWantsRematch">Суперник хоче реванш!</p>
         </div>
       </section>
     </main>
 
-    <script src="client.js"></script>
+    <script type="module" src="js/main.js"></script>
   </body>
 </html>

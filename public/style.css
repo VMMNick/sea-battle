@@ -92,6 +92,17 @@ header {
   right: auto;
 }
 
+.btn-leaderboard {
+  /* Sits to the left of #btn-settings (also right:2px by default) so the two
+     icon buttons don't stack exactly on top of each other. */
+  right: 40px;
+}
+
+.btn-help {
+  /* Sits to the left of #btn-leaderboard, same spacing pattern as above. */
+  right: 78px;
+}
+
 .settings-panel {
   position: absolute;
   top: 40px;
@@ -125,6 +136,51 @@ header {
 }
 .settings-row.disabled-row input {
   cursor: not-allowed;
+}
+.settings-row-nickname {
+  cursor: default;
+}
+.settings-row-nickname span {
+  flex-shrink: 0;
+}
+#input-nickname {
+  flex: 1;
+  min-width: 110px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #2a4b74;
+  background: #0c1f36;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+.settings-row-lang {
+  cursor: default;
+  justify-content: space-between;
+}
+.lang-toggle {
+  display: flex;
+  gap: 4px;
+}
+.btn-lang {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid #2a4b74;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+.btn-lang:hover {
+  background: #163454;
+}
+.btn-lang.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 h1 {
@@ -170,6 +226,38 @@ h1 {
   display: none !important;
 }
 
+/* Generic full-screen modal overlay (currently only the onboarding tutorial),
+   sat above everything else including the settings panel (z-index: 20). */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 12, 22, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 50;
+}
+.modal-panel {
+  max-width: 480px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.onboarding-steps {
+  text-align: left;
+  margin: 0 0 18px;
+  padding-left: 22px;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+.onboarding-steps li {
+  margin-bottom: 10px;
+}
+.onboarding-steps li:last-child {
+  margin-bottom: 0;
+}
+
 .panel {
   background: var(--bg-panel);
   border: 1px solid #1c3a5e;
@@ -196,11 +284,12 @@ h1 {
   margin: -4px 0 14px;
 }
 
-/* Create-game and play-vs-bot sit side by side as two matched cards —
-   the two ways to start a match right now, facing each other. */
+/* The ways to start a match, side by side as matched cards. auto-fit lets
+   this flex from 3 columns down to 1 as the viewport narrows without a pile
+   of extra breakpoints. */
 .menu-primary-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 16px;
   width: 100%;
   margin-bottom: 16px;
@@ -224,8 +313,11 @@ h1 {
   flex: 1;
   color: var(--text-dim);
 }
-.menu-card:last-child {
+.menu-card:nth-child(2) {
   border-top-color: #8a6bf0;
+}
+.menu-card:nth-child(3) {
+  border-top-color: #2ea8a0;
 }
 
 .join-row {
@@ -347,12 +439,14 @@ h1 {
 
 .difficulty-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   justify-content: center;
   margin: 4px 0 2px;
 }
 .btn-diff {
   flex: 1;
+  min-width: 88px;
   padding: 7px 10px;
   border-radius: 7px;
   border: 1px solid #4a3a7a;
@@ -819,9 +913,180 @@ h1 {
   color: var(--text-dim);
   font-style: italic;
 }
+html[data-locale='en'] .shot-log:empty::before {
+  content: 'Shots will appear here';
+}
+
+.leaderboard-list {
+  list-style: none;
+  margin: 14px 0;
+  padding: 0;
+  max-width: 440px;
+  margin-left: auto;
+  margin-right: auto;
+  text-align: left;
+}
+.leaderboard-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: var(--bg-panel);
+  border: 1px solid #1c3a5e;
+  margin-bottom: 6px;
+}
+.leaderboard-rank {
+  font-weight: 700;
+  color: var(--text-dim);
+  width: 1.6em;
+  flex-shrink: 0;
+  text-align: center;
+}
+.leaderboard-entry:nth-child(1) .leaderboard-rank {
+  color: #ffd24d;
+}
+.leaderboard-entry:nth-child(2) .leaderboard-rank {
+  color: #cfd8e3;
+}
+.leaderboard-entry:nth-child(3) .leaderboard-rank {
+  color: #d7a06a;
+}
+.leaderboard-name {
+  flex: 1;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.leaderboard-score {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
 
 #over-title {
   font-size: clamp(1.25rem, 5vw, 1.6rem);
+}
+
+/* ---------- In-battle chat & emoji reactions ---------- */
+
+.chat-wrap {
+  max-width: 460px;
+  margin: 14px auto 0;
+  background: var(--bg-panel);
+  border: 1px solid #1c3a5e;
+  border-radius: var(--radius);
+  padding: 10px 16px 14px;
+}
+.chat-title {
+  margin: 2px 0 8px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.chat-log {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.chat-entry {
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  word-break: break-word;
+}
+.chat-entry:last-child {
+  border-bottom: none;
+}
+.chat-entry.chat-me {
+  color: var(--text-dim);
+}
+.chat-entry.chat-reaction {
+  font-size: 1.05rem;
+}
+.chat-log:empty::before {
+  content: 'Напишіть щось суперникові — повідомлення бачите тільки ви двоє.';
+  color: var(--text-dim);
+  font-style: italic;
+}
+html[data-locale='en'] .chat-log:empty::before {
+  content: 'Say something to your opponent — only the two of you can see it.';
+}
+
+.chat-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.btn-reaction {
+  border: 1px solid #2a4b74;
+  background: #163454;
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.btn-reaction:hover {
+  transform: translateY(-2px);
+  background: #1c3f66;
+}
+.btn-reaction:active {
+  transform: translateY(0);
+}
+
+.chat-form {
+  display: flex;
+  gap: 8px;
+}
+#chat-input {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #2a4b74;
+  background: #0c1f36;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.chat-form .btn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+}
+
+/* A single reaction emoji floating up from the middle of the viewport and
+   fading out — purely cosmetic, appended to <body> and removed after the
+   animation finishes (see chat.js). */
+.reaction-burst {
+  position: fixed;
+  bottom: 20%;
+  font-size: 2.2rem;
+  pointer-events: none;
+  z-index: 50;
+  animation: reaction-float 1.5s ease-out forwards;
+}
+@keyframes reaction-float {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  15% {
+    opacity: 1;
+    transform: translateY(-10px) scale(1.15);
+  }
+  75% {
+    opacity: 1;
+    transform: translateY(-90px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-130px) scale(0.9);
+  }
 }
 
 /* ---------- Responsive breakpoints ---------- */
@@ -951,6 +1216,9 @@ html.light-theme .opp-status-banner.ok {
   border-color: #9fe0bd;
 }
 
+html.light-theme .modal-overlay {
+  background: rgba(20, 40, 70, 0.35);
+}
 html.light-theme .panel {
   border-color: #d7e0ea;
   box-shadow: 0 2px 10px rgba(30, 50, 80, 0.06);
@@ -963,6 +1231,15 @@ html.light-theme .menu-card:hover {
 html.light-theme #input-code {
   border-color: #c7d4e2;
   background: #f4f7fb;
+}
+
+html.light-theme #input-nickname {
+  border-color: #c7d4e2;
+  background: #f4f7fb;
+}
+
+html.light-theme .leaderboard-entry {
+  border-color: #d7e0ea;
 }
 
 html.light-theme .btn {
@@ -1025,6 +1302,19 @@ html.light-theme .btn-diff.active {
   color: #fff;
 }
 
+html.light-theme .btn-lang {
+  border-color: #c7d4e2;
+  color: var(--text-dim);
+}
+html.light-theme .btn-lang:hover {
+  background: #e4ecf5;
+}
+html.light-theme .btn-lang.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 html.light-theme .fleet-chip {
   background: #f4f7fb;
   border-color: #d7e0ea;
@@ -1049,4 +1339,23 @@ html.light-theme .shot-log-wrap {
 }
 html.light-theme .shot-log-entry {
   border-bottom-color: rgba(20, 40, 70, 0.08);
+}
+
+html.light-theme .chat-wrap {
+  border-color: #d7e0ea;
+}
+html.light-theme .chat-entry {
+  border-bottom-color: rgba(20, 40, 70, 0.08);
+}
+html.light-theme .btn-reaction {
+  border-color: #c7d4e2;
+  background: #eef2f7;
+  color: var(--text);
+}
+html.light-theme .btn-reaction:hover {
+  background: #e4ecf5;
+}
+html.light-theme #chat-input {
+  border-color: #c7d4e2;
+  background: #f4f7fb;
 }

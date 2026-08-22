@@ -30,6 +30,10 @@ async function checkNoOverflow(page, label) {
   for (const vp of VIEWPORTS) {
     console.log(`\n=== ${vp.name} ===`);
     const ctx = await browser.newContext({ viewport: { width: vp.width, height: vp.height } });
+    // This test isn't exercising the onboarding tutorial — pre-seed the
+    // "seen" flag so the modal doesn't pop up and intercept clicks (see
+    // test/e2e_onboarding.js for the dedicated onboarding test).
+    await ctx.addInitScript(() => localStorage.setItem('seabattle_onboarding_seen', '1'));
     const page = await ctx.newPage();
     page.on('pageerror', (e) => console.log('  pageerror:', e.message));
     page.on('dialog', (d) => d.dismiss().catch(() => {}));
@@ -46,6 +50,7 @@ async function checkNoOverflow(page, label) {
     // second player joins to trigger placement screen
     const code = (await page.textContent('#room-code')).trim();
     const ctx2 = await browser.newContext();
+    await ctx2.addInitScript(() => localStorage.setItem('seabattle_onboarding_seen', '1'));
     const page2 = await ctx2.newPage();
     page2.on('dialog', (d) => d.dismiss().catch(() => {}));
     await page2.goto(URL);

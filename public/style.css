@@ -623,10 +623,54 @@ h1 {
 .cell.miss {
   background: var(--water-shot);
 }
+/* a spent shell that missed, left bobbing on the surface: a small ripple
+   wake underneath (::before) and the tilted shell casing itself (::after),
+   both gently rocking to read as "floating" rather than a static mark */
+.cell.miss::before {
+  content: '';
+  position: absolute;
+  width: 58%;
+  height: 58%;
+  border-radius: 50%;
+  border: 1.5px solid var(--miss);
+  opacity: 0.45;
+  animation: missRipple 2800ms ease-in-out infinite;
+}
 .cell.miss::after {
-  content: '•';
-  color: var(--miss);
-  font-size: 1.3rem;
+  content: '';
+  position: absolute;
+  width: 44%;
+  height: 20%;
+  background: linear-gradient(160deg, #b9c6d1 0%, #8291a0 45%, #566472 75%, #3a4650 100%);
+  clip-path: polygon(0% 45%, 22% 0%, 100% 8%, 100% 92%, 22% 100%, 0% 55%);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  animation: missFloat 3400ms ease-in-out infinite;
+}
+@keyframes missFloat {
+  0%,
+  100% {
+    transform: translate(-1px, -1px) rotate(-8deg);
+  }
+  50% {
+    transform: translate(1px, 1.5px) rotate(6deg);
+  }
+}
+@keyframes missRipple {
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.2;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cell.miss::before,
+  .cell.miss::after {
+    animation: none;
+  }
 }
 .cell.hit {
   background: var(--sunk);
@@ -1325,9 +1369,6 @@ html.light-theme .cell.sunk {
 }
 html.light-theme .cell.sunk::after {
   color: #a13030;
-}
-html.light-theme .cell.miss::after {
-  color: #4d6577;
 }
 
 html.light-theme .grid-enemy .cell:hover {
